@@ -1,0 +1,129 @@
+@import "tailwindcss";
+
+@theme {
+  --color-maroon-950: #3d0606;
+  --color-maroon-900: #520909;
+  --color-maroon-800: #6b0f0f;
+  --color-maroon-700: #861616;
+  --color-maroon-100: #f6e4e4;
+  --color-maroon-50: #fbf2f2;
+  --color-gold-400: #e5b53a;
+  --color-gold-500: #d4a017;
+  /* PUP sidebar palette */
+  --color-pup-maroon: #800000;
+  --color-pup-maroon-dark: #650000;
+  --color-pup-maroon-active: #8f2020;
+  --color-pup-maroon-divider: #962020;
+  --color-pup-gold: #ffdf00;
+  --color-pup-gray: #e5e5e5;
+}
+
+/* inline: the font variable is set by next/font on <html> (see layout.js). */
+@theme inline {
+  --font-serif: var(--font-dm-serif), Georgia, "Times New Roman", serif;
+  --font-sidebar: var(--font-dm-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+}
+
+@layer base {
+  body {
+    @apply bg-slate-50 text-slate-800 antialiased;
+  }
+  h1,
+  h2,
+  h3 {
+    @apply font-serif text-slate-900;
+  }
+}
+
+/* Shared component classes (Tailwind v4 @utility so they can be reused with @apply). */
+@utility btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-gold-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50;
+}
+@utility btn-primary {
+  @apply btn bg-maroon-800 text-white hover:bg-maroon-700;
+}
+@utility btn-secondary {
+  @apply btn border border-slate-300 bg-white text-slate-700 hover:bg-slate-50;
+}
+@utility btn-danger {
+  @apply btn bg-red-700 text-white hover:bg-red-600;
+}
+@utility btn-link {
+  @apply text-sm font-semibold text-maroon-800 hover:underline disabled:opacity-50;
+}
+@utility label {
+  @apply mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500;
+}
+@utility input {
+  @apply block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-maroon-800 focus:outline-none focus:ring-1 focus:ring-maroon-800 disabled:bg-slate-100;
+}
+@utility card {
+  @apply rounded-xl border border-slate-200 bg-white shadow-sm;
+}
+@utility badge {
+  @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold;
+}
+@utility badge-active {
+  @apply badge bg-emerald-50 text-emerald-700;
+}
+@utility badge-inactive {
+  @apply badge bg-slate-100 text-slate-500;
+}
+@utility badge-role {
+  @apply badge bg-maroon-50 text-maroon-800;
+}
+@utility th {
+  @apply px-6 py-3.5 text-left text-xs font-bold uppercase tracking-wider text-white;
+}
+@utility td {
+  @apply px-6 py-4 align-middle text-sm text-slate-700;
+}
+
+/* One table-header colour for every table: the same #3D0606 as the sidebar. */
+@utility table-head {
+  @apply bg-maroon-950 text-white;
+}
+
+/* Card that wraps a table (matches the shared DataTable container). */
+@utility table-card {
+  @apply overflow-hidden rounded-2xl border border-[#EAE3D9] bg-white;
+}
+
+/* Heading scale: page title, section title inside a page, card title. Serif is for headings only. */
+@utility title-page {
+  @apply font-serif text-3xl text-slate-900;
+}
+@utility title-section {
+  @apply font-serif text-xl text-slate-900;
+}
+@utility title-card {
+  @apply font-serif text-lg text-slate-900;
+}
+
+/* Text-style action inside a table row or list: at least 24px tall so it is easy to hit. */
+@utility row-action {
+  @apply inline-flex min-h-6 items-center rounded px-1.5 text-sm font-semibold text-maroon-800 hover:bg-maroon-50 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-gold-500 disabled:opacity-50;
+}
+
+/* Wrapper for a wide table: shows a soft edge shadow on whichever side has more to scroll to. */
+@utility table-scroll {
+  overflow-x: auto;
+  background-color: #fff;
+  background-image:
+    linear-gradient(to right, #fff 30%, rgb(255 255 255 / 0)),
+    linear-gradient(to left, #fff 30%, rgb(255 255 255 / 0)),
+    radial-gradient(farthest-side at 0 50%, rgb(15 23 42 / 0.2), rgb(15 23 42 / 0)),
+    radial-gradient(farthest-side at 100% 50%, rgb(15 23 42 / 0.2), rgb(15 23 42 / 0));
+  background-position: left center, right center, left center, right center;
+  background-repeat: no-repeat;
+  background-size: 2.5rem 100%, 2.5rem 100%, 0.75rem 100%, 0.75rem 100%;
+  background-attachment: local, local, scroll, scroll;
+}
+
+/* Public home hero: layered maroon and gold glow, CSS only (no image files). */
+@utility hero-bg {
+  background-color: var(--color-maroon-950);
+  background-image:
+    radial-gradient(48rem 24rem at 100% 0%, rgb(176 112 32 / 0.5), transparent 62%),
+    linear-gradient(180deg, var(--color-maroon-950) 0%, var(--color-maroon-800) 100%);
+}
