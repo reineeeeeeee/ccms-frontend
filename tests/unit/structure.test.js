@@ -28,12 +28,12 @@ describe('the frontend only talks to the API gateway', () => {
     }
   });
 
-  it('calls only /api/identity, /api/catalogue and /api/calendar, never a service address', () => {
+  it('calls only /api/identity, /api/catalogue, /api/calendar, /api/operations and /api/logs, never a service address', () => {
     for (const file of sources) {
       const text = readFileSync(file, 'utf8');
       assert.ok(!/https?:\/\/(127\.0\.0\.1|localhost)/.test(text), `${file} has a hard-coded address`);
       for (const match of text.matchAll(/['"`](\/api\/[^'"`$]*)/g)) {
-        assert.match(match[1], /^\/api\/(identity|catalogue|calendar)(\/|$)/, `${file}: ${match[1]}`);
+        assert.match(match[1], /^\/api\/(identity|catalogue|calendar|operations|logs)(\/|$)/, `${file}: ${match[1]}`);
       }
     }
   });
@@ -48,7 +48,7 @@ describe('the frontend only talks to the API gateway', () => {
 
   it('has every screen of the system', () => {
     const pages = sources.filter((f) => f.endsWith('/page.js')).map((f) => f.slice(join(ROOT, 'src/app').length, -'/page.js'.length) || '/');
-    for (const expected of ['/', '/login', '/reset-password', '/accounts', '/office', '/campus', '/offices', '/services', '/services/[id]', '/public/[id]', '/calendar']) {
+    for (const expected of ['/', '/login', '/reset-password', '/accounts', '/office', '/campus', '/offices', '/services', '/services/[id]', '/public/[id]', '/calendar', '/settings', '/logs', '/transactions/new', '/transactions', '/transactions/[id]']) {
       assert.ok(pages.includes(expected), `missing page ${expected}`);
     }
   });

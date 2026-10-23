@@ -1,5 +1,7 @@
 // Helpers for the Calendar page. All dates and times are Asia/Manila (fixed UTC+08:00, no daylight
 // saving), handled as plain strings or with UTC arithmetic so the browser's own time zone never matters.
+// How dates and times are shown to people is in ../ui/date-format.js.
+import { formatTimeRange } from '../ui/date-format.js';
 
 const MANILA_OFFSET_MS = 8 * 60 * 60 * 1000;
 
@@ -7,14 +9,14 @@ export const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday'
 export const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 export const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0]; // Monday first; the API uses 0 = Sunday
 
-/** "Mon-Fri 08:00-17:00 · Sat 08:00-12:00" for a list of schedule items (non-working days are left out). */
+/** "Mon-Fri 8:00 AM to 5:00 PM · Sat 8:00 AM to 12:00 PM" for a list of schedule items (non-working days are left out). */
 export function describeSchedule(items) {
   const byDay = new Map(items.map((item) => [item.day_of_week, item]));
   const groups = [];
   for (const day of WEEK_ORDER) {
     const item = byDay.get(day);
     if (!item?.is_working) continue;
-    const window = `${item.opening_time}-${item.closing_time}`;
+    const window = formatTimeRange(item.opening_time, item.closing_time) || `${item.opening_time}-${item.closing_time}`;
     const last = groups.at(-1);
     if (last && last.window === window && last.end === WEEK_ORDER[WEEK_ORDER.indexOf(day) - 1]) last.end = day;
     else groups.push({ start: day, end: day, window });
@@ -50,13 +52,6 @@ export function typeCategory(value) {
 }
 
 const pad = (n, width = 2) => String(n).padStart(width, '0');
-
-/** 'YYYY-MM-DD HH:MM' in Manila for an ISO timestamp, or '' when it cannot be read. */
-export function manilaDateTime(iso) {
-  const ms = new Date(iso).getTime();
-  if (Number.isNaN(ms)) return '';
-  return new Date(ms + MANILA_OFFSET_MS).toISOString().slice(0, 16).replace('T', ' ');
-}
 
 /** Today's 'YYYY-MM-DD' in Manila. */
 export function todayManila() {

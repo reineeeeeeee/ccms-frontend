@@ -9,18 +9,21 @@ import Modal from '../../components/modals/Modal.js';
 import RowActionMenu from '../../components/ui/RowActionMenu.js';
 import StatusBadge from '../../components/ui/StatusBadge.js';
 import TableState from '../../components/ui/TableState.js';
+import Pager from '../../components/navigation/Pager.js';
+import TableShell, { Table, Th } from '../../components/ui/TableShell.js';
 import { ACCOUNTS_API } from '../../lib/api/identity.js';
 import { OFFICES_API } from '../../lib/api/catalogue.js';
 import { apiFetch } from '../../lib/auth/session.js';
 import { useFormDirty } from '../../lib/ui/useFormDirty.js';
 
-const PAGE_SIZE = 10;
+const DEFAULT_PAGE_SIZE = 10;
 const EMPTY_FORM = { employee_no: '', full_name: '', email: '', role: ROLES.OFFICE_STAFF, office_id: '', password: '' };
 
 function AccountsManager() {
   const [filters, setFilters] = useState({ q: '', role: '', office_id: '', status: '' });
   const [appliedQuery, setAppliedQuery] = useState('');
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [list, setList] = useState({ loading: true, items: [], total: 0, error: null });
   const [offices, setOffices] = useState([]);
   const [notice, setNotice] = useState(null);
@@ -77,7 +80,8 @@ function AccountsManager() {
 
   const load = useCallback(async () => {
     const request = ++latestRequest.current;
-    const params = new URLSearchParams({ page: String(page), page_size: String(PAGE_SIZE) });
+    setList((current) => ({ ...current, loading: true, error: null }));
+    const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
     if (appliedQuery.trim()) params.set('q', appliedQuery.trim());
     if (role) params.set('role', role);
     if (office_id) params.set('office_id', office_id);
@@ -90,7 +94,7 @@ function AccountsManager() {
       if (request !== latestRequest.current) return;
       setList((current) => ({ ...current, loading: false, error: err.message }));
     }
-  }, [page, appliedQuery, role, office_id, status]);
+  }, [page, pageSize, appliedQuery, role, office_id, status]);
 
   useEffect(() => {
     load();
@@ -104,6 +108,12 @@ function AccountsManager() {
   };
   // Inactive offices cannot be assigned, except the one an account already has (so the edit form can show it).
   const officeOptions = (currentId) => offices.filter((o) => o.is_active || o.office_id === currentId);
+
+  // A new page size starts again at page 1; the filters and search stay as they are.
+  function changePageSize(size) {
+    setPageSize(size);
+    setPage(1);
+  }
 
   function setFilter(key, value) {
     setFilters((current) => ({ ...current, [key]: value }));
@@ -192,10 +202,6 @@ function AccountsManager() {
     }
   }
 
-  const from = list.total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
-  const to = Math.min(page * PAGE_SIZE, list.total);
-  const lastPage = Math.max(1, Math.ceil(list.total / PAGE_SIZE));
-
   return (
     <div className="space-y-4">
       <ErrorBanner message={list.error} onDismiss={() => setList((current) => ({ ...current, error: null }))} />
@@ -246,27 +252,28 @@ function AccountsManager() {
         </div>
       </div>
 
-      <div className="table-card">
-        <div className="overflow-x-auto">
-          <table className="min-w-full">
-            <thead className="table-head">
-              <tr>
-                <th className="th">Name</th>
-                <th className="th">Email</th>
-                <th className="th">Role</th>
-                <th className="th">Office</th>
-                <th className="th">Status</th>
-                <th className="th text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
+      <TableShell footer={<Pager page={page} pageSize={pageSize} total={list.total} onPage={setPage} onPageSizeChange={changePageSize} loading={list.loading} />}>
+        <Table
+          busy={list.loading}
+          minWidth="52rem"
+          head={
+            <tr>
+              <Th>Name</Th>
+              <Th>Email</Th>
+              <Th>Role</Th>
+              <Th>Office</Th>
+              <Th>Status</Th>
+              <Th align="right">Actions</Th>
+            </tr>
+          }
+        >
               {list.loading ? (
                 <TableState colSpan={6} kind="loading">Loading accounts…</TableState>
               ) : list.items.length === 0 ? (
                 <TableState colSpan={6}>No accounts match.</TableState>
               ) : (
                 list.items.map((account) => (
-                  <tr key={account.account_id} className={account.is_active ? '' : 'bg-slate-50'}>
+                  <tr key={account.account_id} className={`tr-row ${account.is_active ? '' : 'bg-table-hover'}`}>
                     <td className="td">
                       <p className="font-semibold text-slate-900">{account.full_name}</p>
                       <p className="text-xs text-slate-500">{account.employee_no}</p>
@@ -299,18 +306,8 @@ function AccountsManager() {
                   </tr>
                 ))
               )}
-            </tbody>
-          </table>
-        </div>
-        <div className="flex items-center justify-between border-t border-slate-200 px-4 py-3 text-sm text-slate-600">
-          <span>{list.total === 0 ? 'No accounts' : `Showing ${from}–${to} of ${list.total}`}</span>
-          <div className="flex gap-2">
-            <button type="button" className="btn-secondary px-3 py-1.5" disabled={page <= 1} onClick={() => setPage(page - 1)}>Previous</button>
-            <button type="button" className="btn-secondary px-3 py-1.5" disabled={page >= lastPage} onClick={() => setPage(page + 1)}>Next</button>
-          </div>
-        </div>
-      </div>
-
+        </Table>
+      </TableShell>
       <Modal
         open={form !== null}
         title={form?.id ? 'Edit Account' : 'Add Account'}

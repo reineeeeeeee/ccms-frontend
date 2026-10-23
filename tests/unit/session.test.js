@@ -120,7 +120,7 @@ describe('session client', () => {
     nextResponses.push(new Response(null, { status: 204 }));
     await page.signOut();
     assert.equal(store.has('ccms_access'), false);
-    assert.ok(calls.includes('assign /'));
+    assert.ok(calls.includes('assign /login'));
   });
 
   it('sign out goes to the sign-in page to finish the job when Identity could not be reached', async () => {
@@ -202,5 +202,136 @@ describe('session client: role claim', () => {
     const user = await page.signIn('a@b.c', 'pw');
     assert.equal(user.role, 'super_admin');
     assert.equal(page.sessionRejection(), null);
+  });
+});
+
+describe('session client: sign-in failures', () => {
+  const json = (status, body, headers = {}) => new Response(JSON.stringify(body), { status, headers });
+
+  it('wrong credentials show the generic message', async () => {
+    const page = await freshPage();
+    nextResponses.push(json(401, { error: { code: 'INVALID_CREDENTIALS', message: 'Incorrect email or password' } }));
+    await assert.rejects(page.signIn('a@b.c', 'bad'), (e) => e.status === 401 && e.message === 'Incorrect email or password');
+  });
+
+  it('429 shows the wait as minutes and seconds and keeps Retry-After', async () => {
+    const page = await freshPage();
+    const message = 'Too many sign-in attempts. Try again in 884 seconds.';
+    nextResponses.push(json(429, { error: { code: 'RATE_LIMITED', message } }, { 'retry-after': '884' }));
+    await assert.rejects(page.signIn('a@b.c', 'bad'), (e) => e.status === 429 && e.message === 'Too many sign-in attempts. Try again in 14 minutes 44 seconds.' && e.retryAfterSeconds === 884);
+    assert.equal(calls.filter((c) => c.includes('/auth/login')).length, 1, 'no automatic retry');
+    assert.equal(store.has('ccms_access'), false);
+  });
+
+  it('429 without a usable body falls back to Retry-After, then to a plain message', async () => {
+    const page = await freshPage();
+    nextResponses.push(new Response('<html>nope</html>', { status: 429, headers: { 'retry-after': '30' } }));
+    await assert.rejects(page.signIn('a@b.c', 'bad'), (e) => e.message === 'Too many sign-in attempts. Try again in 30 seconds.');
+    nextResponses.push(new Response('', { status: 429 }));
+    await assert.rejects(page.signIn('a@b.c', 'bad'), (e) => e.message === 'Too many sign-in attempts. Please wait a moment and try again.');
+  });
+
+  it('503 shows a safe temporary message and never the server text', async () => {
+    const page = await freshPage();
+    nextResponses.push(json(503, { error: { code: 'SIGN_IN_UNAVAILABLE', message: 'db pool exhausted at pg.js:42', details: { stack: 'Error: boom' } } }));
+    await assert.rejects(page.signIn('a@b.c', 'pw'), (e) => e.status === 503 && /temporarily unavailable/.test(e.message) && !/pg\.js|stack|boom/.test(e.message));
+    nextResponses.push(new Response('Error: boom\n    at handler (route.js:1:1)', { status: 500 }));
+    await assert.rejects(page.signIn('a@b.c', 'pw'), (e) => /temporarily unavailable/.test(e.message) && !/boom|route\.js/.test(e.message));
+  });
+});
+
+describe('session client: one refresh per tab', () => {
+  const refreshCalls = () => calls.filter((c) => c === 'fetch /api/identity/auth/refresh').length;
+
+  // Routes by URL: refresh answers after a tick, API calls answer from `api`.
+  function route({ refresh, api }) {
+    globalThis.fetch = async (url, init = {}) => {
+      calls.push(`fetch ${url}`);
+      if (init.headers?.authorization) calls.push(`auth ${url} ${init.headers.authorization.slice(-6)}`);
+      await new Promise((r) => setTimeout(r, 5));
+      return url.endsWith('/auth/refresh') ? refresh() : api(url, init);
+    };
+  }
+
+  async function signedInButStale() {
+    const page = await freshPage();
+    nextResponses.push(tokenResponse(10)); // inside the refresh margin: the next call must refresh
+    await page.signIn('a@b.c', 'pw');
+    calls.length = 0;
+    return page;
+  }
+
+  it('concurrent API calls share one refresh and then all run with the new token', async () => {
+    const page = await signedInButStale();
+    route({ refresh: () => tokenResponse(900, { jti: 'fresh' }), api: () => new Response('{"ok":true}', { status: 200 }) });
+    const results = await Promise.all([page.apiFetch('/api/a'), page.apiFetch('/api/b'), page.apiFetch('/api/c')]);
+    assert.deepEqual(results, [{ ok: true }, { ok: true }, { ok: true }]);
+    assert.equal(refreshCalls(), 1);
+    const sent = calls.filter((c) => c.startsWith('auth '));
+    assert.equal(sent.length, 3);
+    assert.equal(new Set(sent.map((c) => c.split(' ')[2])).size, 1, 'all three used the same refreshed token');
+  });
+
+  it('401s that arrive at different times cause one refresh, and a late 401 does not discard the new token', async () => {
+    const page = await freshPage();
+    nextResponses.push(tokenResponse(900));
+    await page.signIn('a@b.c', 'pw'); // a fresh token that the API will refuse
+    calls.length = 0;
+    const refused = jwt();
+    const delays = { '/api/a': 0, '/api/b': 40, '/api/c': 80 };
+    globalThis.fetch = async (url, init = {}) => {
+      calls.push(`fetch ${url}`);
+      await new Promise((r) => setTimeout(r, url.endsWith('/auth/refresh') ? 5 : (delays[url] ?? 0)));
+      if (url.endsWith('/auth/refresh')) return tokenResponse(900, { jti: 'second' });
+      return init.headers.authorization === `Bearer ${refused}` ? new Response('{}', { status: 401 }) : new Response('{"ok":true}', { status: 200 });
+    };
+    const all = await Promise.all([page.apiFetch('/api/a'), page.apiFetch('/api/b'), page.apiFetch('/api/c')]);
+    assert.deepEqual(all, [{ ok: true }, { ok: true }, { ok: true }]);
+    assert.equal(refreshCalls(), 1, 'the second and third 401 reuse the token the first refresh produced');
+  });
+
+  it('a failed refresh signs out once: no loop, one redirect per request, nothing sent without a token', async () => {
+    const page = await signedInButStale();
+    route({ refresh: () => new Response('{}', { status: 401 }), api: () => new Response('{}', { status: 200 }) });
+    const results = await Promise.allSettled([page.apiFetch('/api/a'), page.apiFetch('/api/b')]);
+    assert.ok(results.every((r) => r.status === 'rejected' && r.reason.code === 'SESSION_ENDED'));
+    assert.equal(refreshCalls(), 1);
+    assert.ok(!calls.some((c) => c.startsWith('auth ')), 'no API call was made');
+    assert.ok(calls.includes('assign /login'));
+  });
+
+  it('an API that keeps answering 401 is retried once, with one refresh, then sent to sign-in', async () => {
+    const page = await freshPage();
+    nextResponses.push(tokenResponse(900));
+    await page.signIn('a@b.c', 'pw');
+    calls.length = 0;
+    route({ refresh: () => tokenResponse(900), api: () => new Response('{"error":{"code":"UNAUTHORIZED","message":"no"}}', { status: 401 }) });
+    await assert.rejects(page.apiFetch('/api/a'), (e) => e.status === 401);
+    assert.equal(calls.filter((c) => c === 'fetch /api/a').length, 2, 'original request plus one retry');
+    assert.equal(refreshCalls(), 1);
+    assert.ok(calls.includes('assign /login'));
+  });
+});
+
+describe('formatWait', () => {
+  it('shows seconds below a minute, minutes from a minute, and both when there is a remainder', async () => {
+    const { formatWait } = await freshPage();
+    assert.equal(formatWait(1), '1 second');
+    assert.equal(formatWait(59), '59 seconds');
+    assert.equal(formatWait(60), '1 minute');
+    assert.equal(formatWait(61), '1 minute 1 second');
+    assert.equal(formatWait(120), '2 minutes');
+    assert.equal(formatWait(884), '14 minutes 44 seconds');
+    assert.equal(formatWait(900), '15 minutes');
+  });
+
+  it('429 messages use it, whether the wait comes from the header or from the message text', async () => {
+    const page = await freshPage();
+    for (const [seconds, text] of [[1, '1 second'], [59, '59 seconds'], [60, '1 minute'], [120, '2 minutes'], [884, '14 minutes 44 seconds']]) {
+      nextResponses.push(new Response(JSON.stringify({ error: { code: 'RATE_LIMITED', message: `Too many sign-in attempts. Try again in ${seconds} seconds.` } }), { status: 429 }));
+      await assert.rejects(page.signIn('a@b.c', 'bad'), (e) => e.message === `Too many sign-in attempts. Try again in ${text}.` && e.retryAfterSeconds === seconds);
+      nextResponses.push(new Response('{}', { status: 429, headers: { 'retry-after': String(seconds) } }));
+      await assert.rejects(page.signIn('a@b.c', 'bad'), (e) => e.message === `Too many sign-in attempts. Try again in ${text}.`);
+    }
   });
 });

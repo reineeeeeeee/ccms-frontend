@@ -4,7 +4,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { ROLE_LABELS } from 'ccms-shared/roles';
 import ErrorBanner from '../../components/feedback/ErrorBanner.js';
 import { apiFetch } from '../../lib/auth/session.js';
-import { DAY_NAMES, DAY_SHORT, WEEK_ORDER, describeSchedule, manilaDateTime } from '../../lib/api/calendar.js';
+import { DAY_NAMES, DAY_SHORT, WEEK_ORDER, describeSchedule } from '../../lib/api/calendar.js';
+import { formatDateTime } from '../../lib/ui/date-format.js';
 
 const DEFAULT_OPEN = '08:00';
 const DEFAULT_CLOSE = '17:00';
@@ -215,7 +216,7 @@ export default function WorkingHours({ canWrite = false, onChanged }) {
                     <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />
                     <path d="M12 9v4M12 17h.01" />
                   </svg>
-                  <p>Saving creates a new version of the working hours. This will not affect results already computed; only computations made afterwards follow the updated schedule. Times are 24-hour, Asia/Manila.</p>
+                  <p>Saving creates a new version of the working hours. This will not affect results already computed; only computations made afterwards follow the updated schedule. Times are in Asia/Manila.</p>
                 </div>
                 <div className="mt-6 flex justify-end">
                   <button
@@ -228,7 +229,7 @@ export default function WorkingHours({ canWrite = false, onChanged }) {
                 </div>
               </>
             ) : (
-              <p className="mt-6 text-sm text-slate-600">The weekly schedule of the campus. Times are 24-hour, Asia/Manila.</p>
+              <p className="mt-6 text-sm text-slate-600">The weekly schedule of the campus. Times are in Asia/Manila.</p>
             )}
           </>
         )}
@@ -258,7 +259,7 @@ export default function WorkingHours({ canWrite = false, onChanged }) {
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-sm font-bold text-slate-900">Version {entry.version_no}</span>
                     <time className="text-xs text-slate-500" dateTime={entry.occurred_at}>
-                      {manilaDateTime(entry.occurred_at)}
+                      {formatDateTime(entry.occurred_at) || '-'}
                     </time>
                   </div>
                   <p className="mt-1 text-sm text-slate-700">{describeSchedule(entry.items)}</p>

@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import ConfirmDialog from '../../components/dialogs/ConfirmDialog.js';
 import ErrorBanner from '../../components/feedback/ErrorBanner.js';
+import DateHint from '../../components/forms/DateHint.js';
 import Modal from '../../components/modals/Modal.js';
+import { formatDate, formatTime } from '../../lib/ui/date-format.js';
 import { OFFICES_API } from '../../lib/api/catalogue.js';
 import { apiFetch } from '../../lib/auth/session.js';
 import { useFormDirty } from '../../lib/ui/useFormDirty.js';
@@ -242,7 +244,7 @@ export default function Holidays({ canWrite = false, onChanged }) {
             {selected ? (
               <div>
                 <h3 id="day-heading" className="text-lg font-bold">
-                  {selected}
+                  {formatDate(selected)}
                 </h3>
                 {selectedEntries.length === 0 ? (
                   <p className="mt-2 text-sm text-slate-500">No holidays on this date.</p>
@@ -259,7 +261,7 @@ export default function Holidays({ canWrite = false, onChanged }) {
                           <dl className="mt-2 space-y-0.5 text-xs text-slate-600">
                             <div>Type: {typeLabel(entry.exception_type)}</div>
                             <div>Scope: {officeName(entry.office_id)}</div>
-                            <div>Suspended from: {entry.suspended_from ?? 'Whole day'}</div>
+                            <div>Suspended from: {entry.suspended_from ? formatTime(entry.suspended_from) || entry.suspended_from : 'Whole day'}</div>
                             <div>Repeats: {entry.is_recurring ? `Every year (from ${entry.exception_date.slice(0, 4)})` : 'No'}</div>
                           </dl>
                           {canWrite ? (
@@ -318,7 +320,7 @@ export default function Holidays({ canWrite = false, onChanged }) {
                       <button type="button" className="min-w-0 flex-1 text-left" onClick={() => pickDay(date, true)}>
                         <span className="block truncate text-sm font-semibold text-slate-900">{entry.description || typeLabel(entry.exception_type)}</span>
                         <span className="block text-xs text-slate-500">
-                          {date} · {typeLabel(entry.exception_type)} · {officeName(entry.office_id)}
+                          {formatDate(date)} · {typeLabel(entry.exception_type)} · {officeName(entry.office_id)}
                         </span>
                       </button>
                       {canWrite ? (
@@ -392,7 +394,7 @@ export default function Holidays({ canWrite = false, onChanged }) {
                   onClick={() => pickDay(cell.date, cell.inMonth)}
                   aria-pressed={isSelected}
                   className={`flex min-h-14 flex-col items-start border-b border-r border-slate-100 p-1.5 text-left text-xs sm:min-h-20 sm:p-2 ${tone}`}
-                  aria-label={`${cell.date}${entries.length ? `: ${entries.map((e) => e.description || typeLabel(e.exception_type)).join(', ')}` : ''}`}
+                  aria-label={`${formatDate(cell.date)}${entries.length ? `: ${entries.map((e) => e.description || typeLabel(e.exception_type)).join(', ')}` : ''}`}
                 >
                   <span className={`font-semibold ${numberTone} ${cell.date === today ? 'rounded-full bg-gold-400/40 px-1.5' : ''}`}>{cell.day}</span>
                   {categories.length > 0 ? (
@@ -439,7 +441,8 @@ export default function Holidays({ canWrite = false, onChanged }) {
                     <label className="label" htmlFor="exception_date">
                       Date
                     </label>
-                    <input id="exception_date" type="date" className="input" value={form.exception_date} onChange={(e) => setForm({ ...form, exception_date: e.target.value })} required />
+                    <input id="exception_date" type="date" className="input" value={form.exception_date} onChange={(e) => setForm({ ...form, exception_date: e.target.value })} required aria-describedby="exception_date-hint" />
+                    <DateHint id="exception_date-hint" />
                     {fieldErrors.exception_date ? <p className="mt-1 text-xs text-red-700">{fieldErrors.exception_date}</p> : null}
                   </div>
                   <div>
@@ -511,7 +514,7 @@ export default function Holidays({ canWrite = false, onChanged }) {
             title="Delete entry?"
             message={
               confirm
-                ? `${typeLabel(confirm.exception_type)} on ${confirm.exception_date}${confirm.description ? ` (${confirm.description})` : ''} will be removed.${
+                ? `${typeLabel(confirm.exception_type)} on ${formatDate(confirm.exception_date)}${confirm.description ? ` (${confirm.description})` : ''} will be removed.${
                     confirm.is_recurring ? ' This entry repeats every year: it is removed for every year, not only the one shown.' : ''
                   } Deadlines computed afterwards will use the new calendar.`
                 : ''

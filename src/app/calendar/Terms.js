@@ -2,7 +2,10 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import ErrorBanner from '../../components/feedback/ErrorBanner.js';
+import DateHint from '../../components/forms/DateHint.js';
+import TableShell, { Table, Th } from '../../components/ui/TableShell.js';
 import Modal from '../../components/modals/Modal.js';
+import { formatDate } from '../../lib/ui/date-format.js';
 import RowActionMenu from '../../components/ui/RowActionMenu.js';
 import TableState from '../../components/ui/TableState.js';
 import { apiFetch } from '../../lib/auth/session.js';
@@ -76,18 +79,18 @@ export default function Terms({ canWrite = false, onChanged }) {
           </button>
         ) : null}
       </div>
-      <div className="table-card">
-        <div className="overflow-x-auto">
-          <table className="min-w-full">
-            <thead className="table-head">
-              <tr>
-                <th className="th">Term</th>
-                <th className="th">Start date</th>
-                <th className="th">End date</th>
-                {canWrite ? <th className="th text-right">Action</th> : null}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
+      <TableShell>
+        <Table
+          busy={state.loading}
+          head={
+            <tr>
+              <Th>Term</Th>
+              <Th>Start date</Th>
+              <Th>End date</Th>
+              {canWrite ? <Th align="right">Action</Th> : null}
+            </tr>
+          }
+        >
               {state.loading ? (
                 <TableState colSpan={canWrite ? 4 : 3} kind="loading">Loading terms…</TableState>
               ) : state.items.length === 0 ? (
@@ -108,10 +111,10 @@ export default function Terms({ canWrite = false, onChanged }) {
                 </tr>
               ) : (
                 state.items.map((term) => (
-                  <tr key={term.term_id}>
+                  <tr key={term.term_id} className="tr-row">
                     <td className="td font-semibold text-slate-900">{term.term_name}</td>
-                    <td className="td">{term.start_date}</td>
-                    <td className="td">{term.end_date}</td>
+                    <td className="td">{formatDate(term.start_date) || '-'}</td>
+                    <td className="td">{formatDate(term.end_date) || '-'}</td>
                     {canWrite ? (
                       <td className="td">
                         <div className="flex justify-end">
@@ -122,10 +125,8 @@ export default function Terms({ canWrite = false, onChanged }) {
                   </tr>
                 ))
               )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+        </Table>
+      </TableShell>
 
       {canWrite ? (
         <Modal
@@ -159,14 +160,16 @@ export default function Terms({ canWrite = false, onChanged }) {
                   <label className="label" htmlFor="start_date">
                     Start date
                   </label>
-                  <input id="start_date" type="date" className="input" value={form.start_date} onChange={(e) => setForm({ ...form, start_date: e.target.value })} required />
+                  <input id="start_date" type="date" className="input" value={form.start_date} onChange={(e) => setForm({ ...form, start_date: e.target.value })} required aria-describedby="start_date-hint" />
+                  <DateHint id="start_date-hint" />
                   {fieldErrors.start_date ? <p className="mt-1 text-xs text-red-700">{fieldErrors.start_date}</p> : null}
                 </div>
                 <div>
                   <label className="label" htmlFor="end_date">
                     End date
                   </label>
-                  <input id="end_date" type="date" className="input" value={form.end_date} onChange={(e) => setForm({ ...form, end_date: e.target.value })} required />
+                  <input id="end_date" type="date" className="input" value={form.end_date} onChange={(e) => setForm({ ...form, end_date: e.target.value })} required aria-describedby="end_date-hint" />
+                  <DateHint id="end_date-hint" />
                   {fieldErrors.end_date ? <p className="mt-1 text-xs text-red-700">{fieldErrors.end_date}</p> : null}
                 </div>
               </div>

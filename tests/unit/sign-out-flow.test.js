@@ -38,11 +38,11 @@ describe('sign-out flow: confirmation', () => {
     assert.deepEqual(log, []);
   });
 
-  it('confirming revokes once, clears the token, then goes to the public home page', async () => {
+  it('confirming revokes once, clears the token, then goes to the sign-in page', async () => {
     const { log, flow } = fakes();
     flow.request();
     const result = await flow.confirm();
-    assert.deepEqual(log, ['revoke', 'clearToken', 'navigate /']);
+    assert.deepEqual(log, ['revoke', 'clearToken', 'navigate /login']);
     assert.equal(result.revoked, true);
   });
 

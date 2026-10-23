@@ -18,6 +18,7 @@ export default function ConfirmDialog({
   onConfirm,
   onCancel,
   returnFocusRef,
+  children,
 }) {
   const messageId = useId();
   const cancelRef = useRef(null);
@@ -45,6 +46,7 @@ export default function ConfirmDialog({
       <p id={messageId} className="text-sm text-slate-600">
         {message}
       </p>
+      {children}
     </Modal>
   );
 }

@@ -5,20 +5,25 @@ import { ROLES } from 'ccms-shared/roles';
 import AppShell from '../../components/layout/AppShell.js';
 import ConfirmDialog from '../../components/dialogs/ConfirmDialog.js';
 import ErrorBanner from '../../components/feedback/ErrorBanner.js';
+import TableShell, { Table, Th } from '../../components/ui/TableShell.js';
+import OfficeCodeField from '../../components/forms/OfficeCodeField.js';
 import Modal from '../../components/modals/Modal.js';
 import RowActionMenu from '../../components/ui/RowActionMenu.js';
 import StatusBadge from '../../components/ui/StatusBadge.js';
 import TableState from '../../components/ui/TableState.js';
 import { OFFICES_API } from '../../lib/api/catalogue.js';
 import { apiFetch } from '../../lib/auth/session.js';
+import { OFFICE_CODE_PREFIX, composeOfficeCode, officeCodeProblem, officePart, officeSaveError } from '../../lib/ui/office-code.js';
 import { useFormDirty } from '../../lib/ui/useFormDirty.js';
 
-const EMPTY_FORM = { office_code: '', office_name: '' };
+// office_code is the whole code, or only the office part while an institution prefix is shown (OFFICE_CODE_PREFIX).
+// legacy: an existing code that does not start with the prefix; it is shown and saved whole.
+const EMPTY_FORM = { office_code: '', office_name: '', legacy: false };
 
 function OfficesManager() {
   const [state, setState] = useState({ loading: true, items: [], error: null });
   const [search, setSearch] = useState('');
-  const [form, setForm] = useState(null); // { id?, office_code, office_name }
+  const [form, setForm] = useState(null); // { id?, office_code, office_name, legacy }
   const [fieldErrors, setFieldErrors] = useState({});
   const [formError, setFormError] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -47,25 +52,39 @@ function OfficesManager() {
   function openForm(office) {
     setFieldErrors({});
     setFormError(null);
-    setForm(office ? { id: office.office_id, office_code: office.office_code, office_name: office.office_name } : { ...EMPTY_FORM });
+    if (!office) {
+      setForm({ ...EMPTY_FORM });
+      return;
+    }
+    // With a prefix, edit only the office part of a prefixed code, so saving never writes the prefix twice.
+    const part = OFFICE_CODE_PREFIX ? officePart(OFFICE_CODE_PREFIX, office.office_code) : null;
+    setForm({ id: office.office_id, office_code: part ?? office.office_code, office_name: office.office_name, legacy: Boolean(OFFICE_CODE_PREFIX) && part === null });
   }
 
   async function save(event) {
     event.preventDefault();
+    const prefix = form.legacy ? null : OFFICE_CODE_PREFIX;
+    const problem = officeCodeProblem(prefix, form.office_code);
+    if (problem) {
+      setFieldErrors({ office_code: problem });
+      setFormError(null);
+      return;
+    }
     setSaving(true);
     setFieldErrors({});
     setFormError(null);
     try {
-      const body = { office_code: form.office_code, office_name: form.office_name };
+      const body = { office_code: composeOfficeCode(prefix, form.office_code), office_name: form.office_name };
       if (form.id) await apiFetch(`${OFFICES_API}/${form.id}`, { method: 'PUT', body });
       else await apiFetch(OFFICES_API, { method: 'POST', body });
       setForm(null);
       await reload();
     } catch (err) {
-      // 409 carries which field clashed (code and/or name) under details; fall back to the code field.
-      const details = err.details && typeof err.details === 'object' ? err.details : null;
-      setFieldErrors(details ?? (err.status === 409 ? { office_code: err.message } : {}));
-      setFormError(details || err.status === 409 ? null : err.message);
+      // The service answers 409 for a code or name already in use and 400 with the field that is wrong;
+      // officeSaveError turns those, 403 and network or server failures into plain messages.
+      const { fieldErrors: fields, message } = officeSaveError(err, prefix);
+      setFieldErrors(fields);
+      setFormError(message);
     } finally {
       setSaving(false);
     }
@@ -95,7 +114,7 @@ function OfficesManager() {
             <label className="label" htmlFor="office-search">
               Search office
             </label>
-            <input id="office-search" className="input" placeholder="Code or name" value={search} onChange={(e) => setSearch(e.target.value)} />
+            <input id="office-search" className="input" placeholder="Office name" value={search} onChange={(e) => setSearch(e.target.value)} />
           </div>
           <button type="button" className="btn-primary" onClick={() => openForm(null)}>
             + Add Office
@@ -103,28 +122,26 @@ function OfficesManager() {
         </div>
       </div>
 
-      <div className="table-card">
-        <div className="overflow-x-auto">
-          <table className="min-w-full">
-            <thead className="table-head">
-              <tr>
-                <th className="th">Code</th>
-                <th className="th">Office name</th>
-                <th className="th">Status</th>
-                <th className="th text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
+      <TableShell>
+        <Table
+          busy={state.loading}
+          head={
+            <tr>
+              <Th>Office name</Th>
+              <Th>Status</Th>
+              <Th align="right">Actions</Th>
+            </tr>
+          }
+        >
               {state.loading ? (
-                <TableState colSpan={4} kind="loading">Loading offices…</TableState>
+                <TableState colSpan={3} kind="loading">Loading offices…</TableState>
               ) : visible.length === 0 ? (
-                <TableState colSpan={4}>
+                <TableState colSpan={3}>
                   {state.items.length === 0 ? 'No offices yet. Add the first office from the Citizen’s Charter.' : 'No offices match your search.'}
                 </TableState>
               ) : (
                 visible.map((office) => (
-                  <tr key={office.office_id} className={office.is_active ? '' : 'bg-slate-50'}>
-                    <td className="td font-semibold text-slate-900">{office.office_code}</td>
+                  <tr key={office.office_id} className={`tr-row ${office.is_active ? '' : 'bg-table-hover'}`}>
                     <td className="td">{office.office_name}</td>
                     <td className="td">
                       <StatusBadge variant={office.is_active ? 'active' : 'inactive'}>{office.is_active ? 'Active' : 'Inactive'}</StatusBadge>
@@ -145,10 +162,8 @@ function OfficesManager() {
                   </tr>
                 ))
               )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+        </Table>
+      </TableShell>
 
       <Modal
         open={form !== null}
@@ -169,13 +184,14 @@ function OfficesManager() {
         {form ? (
           <form id="office-form" onSubmit={save} className="space-y-4">
             <ErrorBanner message={formError} />
-            <div>
-              <label className="label" htmlFor="office_code">
-                Office code
-              </label>
-              <input id="office_code" className="input" value={form.office_code} onChange={(e) => setForm({ ...form, office_code: e.target.value })} required maxLength={20} autoFocus />
-              {fieldErrors.office_code ? <p className="mt-1 text-xs text-red-700">{fieldErrors.office_code}</p> : null}
-            </div>
+            <OfficeCodeField
+              prefix={OFFICE_CODE_PREFIX}
+              legacy={form.legacy}
+              value={form.office_code}
+              onChange={(value) => setForm({ ...form, office_code: value })}
+              error={fieldErrors.office_code}
+              autoFocus
+            />
             <div>
               <label className="label" htmlFor="office_name">
                 Office name (as printed in the Charter)
@@ -192,7 +208,7 @@ function OfficesManager() {
         title="Deactivate office?"
         message={
           confirm
-            ? `${confirm.office_code} will no longer be offered when adding accounts or services. Existing records that use it keep showing it. You can reactivate it later.`
+            ? `${confirm.office_name} will no longer be offered when adding accounts or services. Existing records that use it keep showing it. You can reactivate it later.`
             : ''
         }
         confirmLabel="Deactivate"

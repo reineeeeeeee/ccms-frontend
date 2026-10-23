@@ -78,19 +78,36 @@ async function mockedPage(browser, { viewport = DESKTOP, seedRole = 'super_admin
   return { ctx, page, calls, errors };
 }
 
-const signOutButton = (page) => page.locator('header').getByRole('button', { name: 'Sign out' });
+// Sign out lives in the header's account menu: the menu button (aria-label "Account menu for <name>",
+// aria-haspopup="menu") opens a menu whose only item is "Sign out", and that item opens the confirmation.
+// Focus goes back to the menu button, the control that opened Sign out, when the confirmation closes.
+const accountMenu = (page) => page.locator('header').getByRole('button', { name: /^Account menu for / });
+const signOutItem = (page) => page.getByRole('menuitem', { name: 'Sign out' });
 const signOutDialog = (page) => page.getByRole('alertdialog', { name: 'Sign out?' });
+
+/** Opens the account menu and chooses Sign out, as a person with a mouse does. */
+async function openSignOut(page) {
+  await accountMenu(page).click();
+  await signOutItem(page).click();
+}
 
 async function focused(page) {
   return page.evaluate(() => {
     const a = document.activeElement;
-    return { text: (a?.textContent ?? '').trim(), inDialog: Boolean(a?.closest('[role="alertdialog"]')), inHeader: Boolean(a?.closest('header')) };
+    return {
+      text: (a?.textContent ?? '').trim(),
+      label: a?.getAttribute('aria-label') ?? '',
+      role: a?.getAttribute('role') ?? '',
+      inDialog: Boolean(a?.closest('[role="alertdialog"]')),
+      inHeader: Boolean(a?.closest('header')),
+    };
   });
 }
+const onAccountMenu = (state) => state.inHeader && state.label.startsWith('Account menu for ');
 
 async function openShell(page) {
   await page.goto(BASE + '/offices');
-  await signOutButton(page).waitFor({ timeout: 30_000 });
+  await accountMenu(page).waitFor({ timeout: 30_000 });
 }
 
 /** Runs one scenario in its own context; a thrown error is a FAIL, not the end of the run. */
@@ -112,7 +129,7 @@ async function logoutChecks(browser) {
   for (const [label, viewport] of [['desktop', DESKTOP], ['mobile', MOBILE]]) {
     await scenario(browser, `cancel+focus ${label}`, { viewport }, async ({ page, calls }) => {
       await openShell(page);
-      await signOutButton(page).click();
+      await openSignOut(page);
       const dialog = signOutDialog(page);
       await dialog.waitFor();
       ok(`${label}: confirmation shows the default message`, await dialog.getByText('You will need to sign in again to use CCMS.').isVisible());
@@ -130,17 +147,21 @@ async function logoutChecks(browser) {
       await dialog.getByRole('button', { name: 'Cancel' }).click();
       await dialog.waitFor({ state: 'hidden' });
       const after = await focused(page);
-      ok(`${label}: Cancel closes and returns focus to Sign out`, after.text === 'Sign out' && after.inHeader);
+      ok(`${label}: Cancel closes and returns focus to the account menu that opened Sign out`, onAccountMenu(after));
       ok(`${label}: Cancel does not revoke (0 logout calls)`, calls.logout === 0);
     });
 
     await scenario(browser, `escape+enter ${label}`, { viewport }, async ({ page, calls }) => {
       await openShell(page);
-      await signOutButton(page).click();
+      await openSignOut(page);
       await signOutDialog(page).waitFor();
       await page.keyboard.press('Escape');
       await signOutDialog(page).waitFor({ state: 'hidden' });
-      ok(`${label}: Escape closes and returns focus to Sign out`, (await focused(page)).text === 'Sign out');
+      ok(`${label}: Escape closes and returns focus to the account menu`, onAccountMenu(await focused(page)));
+      await page.keyboard.press('Enter'); // the account menu has focus: Enter opens the menu, focus lands on Sign out
+      await signOutItem(page).waitFor();
+      const inMenu = await focused(page);
+      ok(`${label}: Enter on the account menu opens it with focus on Sign out`, inMenu.role === 'menuitem' && inMenu.text === 'Sign out');
       await page.keyboard.press('Enter'); // Sign out has focus: Enter opens the confirmation again
       await signOutDialog(page).waitFor();
       await page.keyboard.press('Enter'); // focus is on Cancel: Enter cancels, never signs out
@@ -151,7 +172,7 @@ async function logoutChecks(browser) {
 
   await scenario(browser, 'success+duplicate+busy', { logout: [{ delay: 1500, then: 'ok' }] }, async ({ page, calls }) => {
     await openShell(page);
-    await signOutButton(page).click();
+    await openSignOut(page);
     const dialog = signOutDialog(page);
     await dialog.waitFor();
     // Three synchronous clicks on the confirm button: only one revocation may happen.
@@ -166,9 +187,9 @@ async function logoutChecks(browser) {
     ok('busy: confirm shows "Signing out…" and both buttons are disabled', (await busyButton.isDisabled()) && (await dialog.getByRole('button', { name: 'Cancel' }).isDisabled()));
     await page.keyboard.press('Escape');
     ok('busy: Escape does not close the dialog', await dialog.isVisible());
-    await page.waitForURL(BASE + '/', { timeout: 15_000 });
-    await page.locator('header').getByRole('link', { name: 'Staff Login', exact: true }).waitFor();
-    ok('success: lands on the public home page', true);
+    await page.waitForURL(BASE + '/login', { timeout: 15_000 });
+    await page.locator('#email').waitFor();
+    ok('success: lands on the sign-in page, not the public home page', new URL(page.url()).pathname === '/login' && (await page.locator('#password').isVisible()) && (await page.getByText(/could not confirm that your session was ended/).count()) === 0);
     ok('duplicate clicks: exactly one logout request', calls.logout === 1);
     const left = await page.evaluate(() => ({ token: sessionStorage.getItem('ccms_access'), marker: document.cookie.includes('ccms_signed_in=') }));
     ok('success: saved token and signed-in marker are cleared', left.token === null && !left.marker);
@@ -177,7 +198,7 @@ async function logoutChecks(browser) {
   for (const [name, answers] of [['http 500', [500, 500]], ['network abort', ['abort', 'abort']]]) {
     await scenario(browser, `failure ${name}`, { logout: answers }, async ({ page, calls }) => {
       await openShell(page);
-      await signOutButton(page).click();
+      await openSignOut(page);
       await signOutDialog(page).getByRole('button', { name: 'Sign out' }).click();
       await page.waitForURL(/\/login(\?|$)/, { timeout: 15_000 });
       const banner = page.getByRole('alert').filter({ hasText: 'could not confirm that your session was ended' });
@@ -196,7 +217,7 @@ async function logoutChecks(browser) {
 
   await scenario(browser, 'retry succeeds', { logout: [500, 'ok'] }, async ({ page, calls }) => {
     await openShell(page);
-    await signOutButton(page).click();
+    await openSignOut(page);
     await signOutDialog(page).getByRole('button', { name: 'Sign out' }).click();
     await page.waitForURL(/\/login(\?|$)/, { timeout: 15_000 });
     await page.locator('#email').waitFor({ timeout: 15_000 });
@@ -209,11 +230,16 @@ async function logoutChecks(browser) {
     await page.getByRole('button', { name: '+ Add Office' }).click();
     const form = page.getByRole('dialog', { name: 'Add Office' });
     await form.waitFor();
-    // Known limitation: the modal backdrop covers the header, so Sign out cannot be clicked while a
-    // form is open. Confirm that, then press the button from script to check the warning wiring.
-    const blocked = await signOutButton(page).click({ trial: true, timeout: 1000 }).then(() => false, () => true);
+    // Known limitation: the modal backdrop covers the header, so the account menu (and with it Sign out)
+    // cannot be clicked while a form is open. Confirm that, then open the menu and choose Sign out from
+    // script to check the warning wiring.
+    const blocked = await accountMenu(page).click({ trial: true, timeout: 1000 }).then(() => false, () => true);
     ok('dirty: Sign out is covered by the open form modal (known limitation)', blocked);
-    const pressSignOut = () => page.evaluate(() => document.querySelector('header button[aria-haspopup="dialog"]').click());
+    const pressSignOut = async () => {
+      await page.evaluate(() => document.querySelector('header button[aria-haspopup="menu"]').click());
+      await signOutItem(page).waitFor();
+      await page.evaluate(() => [...document.querySelectorAll('[role="menuitem"]')].find((i) => i.textContent.trim() === 'Sign out').click());
+    };
 
     await pressSignOut();
     await signOutDialog(page).waitFor();
@@ -231,7 +257,7 @@ async function logoutChecks(browser) {
 
     await form.getByRole('button', { name: 'Cancel' }).click();
     await form.waitFor({ state: 'hidden' });
-    await signOutButton(page).click();
+    await openSignOut(page);
     ok('dirty: after the form is cancelled the default message is back', await signOutDialog(page).getByText('You will need to sign in again to use CCMS.').isVisible());
   });
 
@@ -245,7 +271,7 @@ async function logoutChecks(browser) {
     await page.goto(BASE + '/offices');
     await page.getByText('Your account role is not recognized. Contact a Super Admin.').waitFor({ timeout: 15_000 });
     await page.waitForTimeout(1000);
-    ok('invalid role: app shell explains instead of redirecting', new URL(page.url()).pathname === '/offices' && (await signOutButton(page).count()) === 0);
+    ok('invalid role: app shell explains instead of redirecting', new URL(page.url()).pathname === '/offices' && (await accountMenu(page).count()) === 0);
     ok('invalid role: the rejected token is never sent', calls.bearer.length === 0);
     ok('invalid role: nothing saved in sessionStorage', (await page.evaluate(() => sessionStorage.getItem('ccms_access'))) === null);
     await page.getByRole('link', { name: 'Go to sign in' }).click();

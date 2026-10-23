@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import ErrorBanner from '../../components/feedback/ErrorBanner.js';
+import TableShell, { Table, Th } from '../../components/ui/TableShell.js';
 import { apiFetch } from '../../lib/auth/session.js';
-import { SYNC_LABELS, manilaDateTime } from '../../lib/api/calendar.js';
+import { SYNC_LABELS } from '../../lib/api/calendar.js';
+import { formatDateTime } from '../../lib/ui/date-format.js';
 
 const STATUS_CLASS = {
   FAILED: 'badge bg-red-50 text-red-700',
@@ -54,12 +56,12 @@ export default function SyncPanel({ refreshKey }) {
         <>
           <div className="mt-3 grid gap-3 sm:grid-cols-2">
             <p className="text-sm text-slate-700" data-testid="audit-sync">
-              {data.audit_last_synced ? `Audit last synced: ${manilaDateTime(data.audit_last_synced)} (Asia/Manila)` : 'Audit has not synced yet'}
+              {data.audit_last_synced ? `Audit last synced: ${formatDateTime(data.audit_last_synced) || '-'} (Asia/Manila)` : 'Audit has not synced yet'}
             </p>
             <p className="text-sm text-slate-700" data-testid="fms-push">
               {push ? (
                 <>
-                  Last FMS push: <StatusBadge status={push.status} /> <span className="text-slate-500">{manilaDateTime(push.at)} (Asia/Manila)</span>
+                  Last FMS push: <StatusBadge status={push.status} /> <span className="text-slate-500">{formatDateTime(push.at) || '-'} (Asia/Manila)</span>
                 </>
               ) : (
                 'No FMS push yet'
@@ -69,18 +71,19 @@ export default function SyncPanel({ refreshKey }) {
           {push?.status === 'FAILED' ? (
             <p className="mt-2 text-sm font-semibold text-red-700">The last push to FMS failed. It will be retried automatically; your changes are saved.</p>
           ) : null}
-          <div className="mt-4 overflow-x-auto">
-            <table className="min-w-full">
-              <thead className="table-head">
+          <TableShell className="mt-4">
+            <Table
+              busy={state.loading}
+              head={
                 <tr>
-                  <th className="th">System</th>
-                  <th className="th">Event</th>
-                  <th className="th">Status</th>
-                  <th className="th">Last synced</th>
-                  <th className="th text-right">Attempts</th>
+                  <Th>System</Th>
+                  <Th>Event</Th>
+                  <Th>Status</Th>
+                  <Th>Last synced</Th>
+                  <Th align="right">Attempts</Th>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
+              }
+            >
                 {data.recent.length === 0 ? (
                   <tr>
                     <td className="td text-slate-500" colSpan={5}>
@@ -89,20 +92,19 @@ export default function SyncPanel({ refreshKey }) {
                   </tr>
                 ) : (
                   data.recent.map((row) => (
-                    <tr key={row.sync_id} className={row.status === 'FAILED' ? 'bg-red-50/40' : ''}>
+                    <tr key={row.sync_id} className={`tr-row ${row.status === 'FAILED' ? 'bg-red-50' : ''}`}>
                       <td className="td font-semibold">{row.consumer_system}</td>
                       <td className="td">{row.event_type}</td>
                       <td className="td">
                         <StatusBadge status={row.status} />
                       </td>
-                      <td className="td">{row.last_synced_at ? manilaDateTime(row.last_synced_at) : '-'}</td>
+                      <td className="td">{formatDateTime(row.last_synced_at) || '-'}</td>
                       <td className="td text-right">{row.attempts}</td>
                     </tr>
                   ))
                 )}
-              </tbody>
-            </table>
-          </div>
+            </Table>
+          </TableShell>
         </>
       ) : null}
     </section>

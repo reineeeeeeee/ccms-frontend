@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import AppShell from '../components/layout/AppShell.js';
 import PublicHeader from '../components/layout/PublicHeader.js';
@@ -8,12 +8,11 @@ import ErrorBanner from '../components/feedback/ErrorBanner.js';
 import Pager from '../components/navigation/Pager.js';
 import StatusBadge from '../components/ui/StatusBadge.js';
 import { BRAND } from '../lib/constants/brand.js';
-import { currentUser, mightBeSignedIn, refreshSession } from '../lib/auth/session.js';
-import { publicFetch, toQuery } from '../lib/api/client.js';
-import { PUBLIC_SERVICES_API, classificationLabel } from '../lib/api/catalogue.js';
+import { mightBeSignedIn, refreshSession } from '../lib/auth/session.js';
+import { listAllPublicServices } from '../lib/api/public-services.js';
+import { classificationLabel } from '../lib/api/catalogue.js';
+import { CLASSIFICATION_FILTERS, PUBLIC_PAGE_SIZE, PUBLIC_PAGE_SIZES, clampPage, filterServices, hasNarrowing, officeOptions, pageOf } from '../lib/ui/public-catalogue.js';
 
-const PAGE_SIZE = 12;
-const API = PUBLIC_SERVICES_API;
 
 // Quick links under the hero. Each one does something real on this page.
 const TILES = [
@@ -41,66 +40,74 @@ function SearchIcon() {
   );
 }
 
-// Search text, the page and the public services list, shared by the signed-out and signed-in home.
+// The search text, the filters, the view and the page, shared by the signed-out and signed-in home. One list of services (all the
+// pages the public API returns for the search); classification, office, counting and paging are worked out from it, so the Grid and
+// the List always show the same thing and switching view keeps every filter and the page.
 function useCatalogue() {
   const [input, setInput] = useState('');
   const [search, setSearch] = useState('');
+  const [classification, setClassification] = useState('');
+  const [office, setOffice] = useState('');
+  const [view, setView] = useState('grid');
   const [page, setPage] = useState(1);
-  const [state, setState] = useState({ loading: true, items: [], total: 0, error: null });
-  // Office names seen in the services loaded so far. The API has no office list for the public page,
-  // so this is not every office, only the ones that have appeared in results.
-  const [offices, setOffices] = useState([]);
-
+  const [pageSize, setPageSize] = useState(PUBLIC_PAGE_SIZE);
+  const [attempt, setAttempt] = useState(0); // bumped by "Try again"
+  const [state, setState] = useState({ loading: true, all: [], truncated: false, error: null });
+  const latest = useRef(0); // the newest request; an older answer that arrives late is thrown away
   useEffect(() => {
-    let cancelled = false;
-    publicFetch(`${API}${toQuery({ search, page, page_size: PAGE_SIZE })}`)
+    const id = ++latest.current;
+    listAllPublicServices(search)
       .then((data) => {
-        if (cancelled) return;
-        setState({ loading: false, items: data.items ?? [], total: data.total ?? 0, error: null });
-        setOffices((known) => {
-          const names = new Set(known);
-          for (const item of data.items ?? []) if (item.office_name) names.add(item.office_name);
-          return names.size === known.length ? known : [...names].sort((a, b) => a.localeCompare(b));
-        });
+        if (id === latest.current) setState({ loading: false, all: data.items, truncated: data.truncated, error: null });
       })
       .catch((err) => {
-        if (!cancelled) setState({ loading: false, items: [], total: 0, error: err.message });
+        if (id === latest.current) setState({ loading: false, all: [], truncated: false, error: err.message });
       });
     return () => {
-      cancelled = true;
+      latest.current += 1;
     };
-  }, [search, page]);
+  }, [search, attempt]);
+
+  const offices = useMemo(() => officeOptions(state.all, office), [state.all, office]);
+  const filtered = useMemo(() => filterServices(state.all, { classification, office }), [state.all, classification, office]);
+  const currentPage = clampPage(page, filtered.length, pageSize);
+  const items = useMemo(() => pageOf(filtered, currentPage, pageSize), [filtered, currentPage, pageSize]);
+
+  const loading = () => setState((s) => ({ ...s, loading: true, error: null }));
 
   function onSubmit(event) {
     event.preventDefault();
-    setState((s) => ({ ...s, loading: true }));
+    if (input.trim() !== search.trim()) loading();
     setPage(1);
-    setSearch(input);
+    setSearch(input.trim());
   }
 
   function onClear() {
+    if (search) loading();
     setInput('');
     setSearch('');
-    setPage(1);
-  }
-
-  // Option B: choosing an office searches for its name (the existing `search` parameter).
-  function onOffice(name) {
-    if (!name) return onClear();
-    setState((s) => ({ ...s, loading: true }));
-    setInput(name);
-    setSearch(name);
+    setClassification('');
+    setOffice('');
     setPage(1);
   }
 
   function browseAll() {
-    setInput('');
-    setSearch('');
-    setPage(1);
+    onClear();
     document.getElementById('services')?.scrollIntoView({ behavior: 'smooth' });
   }
 
-  return { input, setInput, search, page, setPage, state, offices, onSubmit, onClear, onOffice, browseAll };
+  function retry() {
+    loading();
+    setAttempt((n) => n + 1);
+  }
+
+  // A new classification or office starts again at page 1; changing the view or the page does not touch the filters.
+  const chooseClassification = (value) => { setClassification(value); setPage(1); };
+  const chooseOffice = (value) => { setOffice(value); setPage(1); };
+  // A different page size starts again at page 1; the search and filters stay.
+  const changePageSize = (size) => { setPageSize(size); setPage(1); };
+
+  return { input, setInput, search, classification, office, view, setView, page: currentPage, setPage, pageSize, changePageSize, state, offices, items, total: filtered.length, onSubmit, onClear, browseAll, retry, chooseClassification, chooseOffice };
 }
 
 function OfficeIcon() {
@@ -120,92 +127,233 @@ function ClockIcon() {
   );
 }
 
+function GridIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4" aria-hidden="true">
+      <rect x="3" y="3" width="5.5" height="5.5" rx="1" />
+      <rect x="11.5" y="3" width="5.5" height="5.5" rx="1" />
+      <rect x="3" y="11.5" width="5.5" height="5.5" rx="1" />
+      <rect x="11.5" y="11.5" width="5.5" height="5.5" rx="1" />
+    </svg>
+  );
+}
+
+function ListIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" className="h-4 w-4" aria-hidden="true">
+      <path d="M4 5h12M4 10h12M4 15h12" />
+    </svg>
+  );
+}
+
+// Grid / List switch. Only the view changes: the search, filters and page stay as they are.
+function ViewToggle({ view, onView }) {
+  const button = (value, label, Icon) => {
+    const selected = view === value;
+    return (
+      <button
+        type="button"
+        aria-pressed={selected}
+        aria-label={`${label} view`}
+        onClick={() => onView(value)}
+        className={`inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-maroon-700 ${selected ? 'bg-maroon-900 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
+      >
+        <Icon />
+        {label}
+      </button>
+    );
+  };
+  return (
+    <div role="group" aria-label="Services view" className="inline-flex gap-1 rounded-xl border border-[#EAE3D9] bg-white p-1 shadow-sm">
+      {button('grid', 'Grid', GridIcon)}
+      {button('list', 'List', ListIcon)}
+    </div>
+  );
+}
+
+function OfficeSelect({ offices, value, onChange, className = '' }) {
+  if (offices.length === 0) return null;
+  return (
+    <div className={className}>
+      <label className="label" htmlFor="office-filter">
+        Office
+      </label>
+      <select id="office-filter" className="input rounded-lg" value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">All offices</option>
+        {offices.map((name) => (
+          <option key={name} value={name}>
+            {name}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+function ClassificationPills({ value, onChange }) {
+  return (
+    <div role="group" aria-label="Classification">
+      <p className="label" id="classification-label">
+        Classification
+      </p>
+      <div className="flex flex-wrap gap-2">
+        {CLASSIFICATION_FILTERS.map((option) => {
+          const selected = value === option.value;
+          return (
+            <button
+              key={option.value || 'all'}
+              type="button"
+              aria-pressed={selected}
+              onClick={() => onChange(option.value)}
+              className={`rounded-full border px-4 py-1.5 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-maroon-700 ${selected ? 'border-maroon-900 bg-maroon-900 text-white' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+const detailHref = (item) => `/public/${encodeURIComponent(item.service_id)}`;
+
+function rememberServicePosition(item) {
+  const target = `${window.location.pathname}${window.location.search}#service-${encodeURIComponent(item.service_id)}`;
+  window.history.replaceState(window.history.state, '', target);
+  window.sessionStorage.setItem('ccms:catalogue-return', '1');
+}
+
+function ServiceCard({ item }) {
+  return (
+    <li id={`service-${item.service_id}`} className="scroll-mt-6 flex min-w-0 flex-col rounded-2xl border border-[#EAE3D9] bg-white p-5 shadow-sm">
+      <div>
+        <StatusBadge variant={item.classification}>{classificationLabel(item.classification)}</StatusBadge>
+      </div>
+      <h3 className="mt-3 break-words font-sans text-lg font-bold leading-snug text-maroon-950">{item.service_name}</h3>
+      <p className="mt-2 flex items-start gap-2 text-sm text-slate-500">
+        <OfficeIcon />
+        <span className="min-w-0 break-words">{item.office_name}</span>
+      </p>
+      <div className="mt-auto pt-4">
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 border-t border-[#EAE3D9] pt-3 text-sm text-slate-800">
+          <ClockIcon />
+          <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Standard</span>
+          <span className="min-w-0 break-words font-semibold">{item.standard_text}</span>
+        </div>
+        <Link href={detailHref(item)} onClick={() => rememberServicePosition(item)} className="mt-3 inline-block text-sm font-semibold text-maroon-800 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-maroon-700">
+          View requirements &rarr;
+        </Link>
+      </div>
+    </li>
+  );
+}
+
+function ServiceRow({ item }) {
+  return (
+    <li id={`service-${item.service_id}`} className="scroll-mt-6 min-w-0 rounded-xl border border-l-4 border-[#EAE3D9] border-l-maroon-900 bg-white shadow-sm">
+      <div className="grid gap-3 p-4 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,13rem)_auto] md:items-center md:gap-5">
+        <div className="min-w-0">
+          <h3 className="break-words font-sans text-base font-bold leading-snug text-maroon-950">{item.service_name}</h3>
+          <p className="mt-1 flex items-start gap-2 text-sm text-slate-500">
+            <OfficeIcon />
+            <span className="min-w-0 break-words">{item.office_name}</span>
+          </p>
+        </div>
+        <div>
+          <StatusBadge variant={item.classification}>{classificationLabel(item.classification)}</StatusBadge>
+        </div>
+        <div className="flex min-w-0 items-start gap-2 text-sm text-slate-800">
+          <ClockIcon />
+          <span className="min-w-0">
+            <span className="block text-xs font-bold uppercase tracking-wider text-slate-500">Standard</span>
+            <span className="block break-words font-semibold">{item.standard_text}</span>
+          </span>
+        </div>
+        <Link href={detailHref(item)} onClick={() => rememberServicePosition(item)} className="btn w-full border border-maroon-900 bg-white text-maroon-900 hover:bg-maroon-50 md:w-auto">
+          View requirements &rarr;
+        </Link>
+      </div>
+    </li>
+  );
+}
+
 function ServiceResults({ catalogue }) {
-  const { search, page, setPage, state, offices, onClear, onOffice } = catalogue;
-  const selectedOffice = offices.includes(search) ? search : '';
+  const { search, classification, office, view, setView, page, setPage, pageSize, changePageSize, state, offices, items, total, onClear, retry, chooseClassification, chooseOffice } = catalogue;
+  const list = view === 'list';
+  const narrowed = hasNarrowing({ classification, office });
+  const noMatch = !state.loading && !state.error && total === 0 && state.all.length >= 0;
+  const noServicesAtAll = noMatch && !search && !narrowed && state.all.length === 0;
+  const clearLabel = narrowed && !search ? 'Clear filters' : 'Show all services';
   return (
     <section id="services" className="scroll-mt-4">
       <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
         <div className="min-w-0">
-          <h2 className="font-sans text-3xl font-bold text-maroon-950">{search ? `Results for "${search}"` : 'All services'}</h2>
+          <h2 className="font-serif text-3xl text-maroon-950">{search ? `Results for "${search}"` : 'All services'}</h2>
           {!state.loading && !state.error ? (
-            <p className="mt-1 text-sm text-slate-500">
-              Showing {state.total} {state.total === 1 ? 'service' : 'services'}
+            <p className="mt-1 text-sm text-slate-500" data-testid="service-count">
+              Showing {total} {total === 1 ? 'service' : 'services'}
+              {state.truncated ? ' (the list is incomplete: too many services to load at once)' : ''}
             </p>
           ) : null}
         </div>
-        {offices.length > 0 ? (
-          <div className="w-full sm:w-72">
-            <label className="label" htmlFor="office-filter">
-              Office
-            </label>
-            <select id="office-filter" className="input rounded-lg" value={selectedOffice} onChange={(e) => onOffice(e.target.value)} aria-describedby="office-filter-note">
-              <option value="">All offices</option>
-              {offices.map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
-            </select>
-            <p id="office-filter-note" className="sr-only">
-              This list only includes offices from the services loaded so far.
-            </p>
-          </div>
-        ) : null}
+        <div className="flex w-full flex-wrap items-end justify-between gap-3 sm:w-auto sm:justify-end">
+          <ViewToggle view={view} onView={setView} />
+        </div>
       </div>
+
+      <div className="card mb-4 flex flex-wrap items-end justify-between gap-4 p-4">
+        <ClassificationPills value={classification} onChange={chooseClassification} />
+        <OfficeSelect offices={offices} value={office} onChange={chooseOffice} className="w-full sm:w-72" />
+      </div>
+
       <ErrorBanner message={state.error} />
-      {state.loading && !state.error ? <p className="text-sm text-slate-500">Loading services…</p> : null}
-      {!state.loading && !state.error && state.items.length === 0 ? (
+      {state.error ? (
+        <button type="button" className="btn-secondary mb-4" onClick={retry}>
+          Try again
+        </button>
+      ) : null}
+      {state.loading && !state.error ? <p className="text-sm text-slate-500" role="status">Loading services…</p> : null}
+      {noMatch ? (
         <div className="card flex flex-col items-center px-6 py-12 text-center">
           <span className="flex h-14 w-14 items-center justify-center rounded-full bg-maroon-50 text-maroon-800">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-7 w-7" aria-hidden="true">
-              <path d={search ? 'M11 5a6 6 0 100 12 6 6 0 000-12zM20 20l-4-4' : 'M9 12l2 2 4-4M7 3h10a2 2 0 012 2v14a2 2 0 01-2 2H7a2 2 0 01-2-2V5a2 2 0 012-2z'} />
+              <path d={search || narrowed ? 'M11 5a6 6 0 100 12 6 6 0 000-12zM20 20l-4-4' : 'M9 12l2 2 4-4M7 3h10a2 2 0 012 2v14a2 2 0 01-2 2H7a2 2 0 01-2-2V5a2 2 0 012-2z'} />
             </svg>
           </span>
-          {search ? (
-            <>
-              <p className="mt-4 font-semibold text-slate-900">No services match {`"${search}"`}</p>
-              <p className="mt-1 max-w-sm text-sm text-slate-600">Check the spelling, or try a shorter service or office name.</p>
-              <button type="button" className="btn-primary mt-5" onClick={onClear}>
-                Show all services
-              </button>
-            </>
-          ) : (
+          {noServicesAtAll ? (
             <>
               <p className="mt-4 font-semibold text-slate-900">No services are published yet</p>
               <p className="mt-1 max-w-sm text-sm text-slate-600">The list of services will appear here once the offices publish them. Please check back soon.</p>
             </>
+          ) : (
+            <>
+              <p className="mt-4 font-semibold text-slate-900">{search ? `No services match "${search}"` : 'No services match these filters'}</p>
+              <p className="mt-1 max-w-sm text-sm text-slate-600">{search ? 'Check the spelling, or try a shorter service or office name.' : 'Try a different classification or office.'}</p>
+              <button type="button" className="btn-primary mt-5" onClick={onClear}>
+                {clearLabel}
+              </button>
+            </>
           )}
         </div>
       ) : null}
-      {state.items.length > 0 ? (
+      {items.length > 0 ? (
         <>
-          <ul className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            {state.items.map((item) => (
-              <li key={item.service_id} className="flex min-w-0 flex-col rounded-2xl border border-[#EAE3D9] bg-white p-5">
-                <div>
-                  <StatusBadge variant={item.classification}>{classificationLabel(item.classification)}</StatusBadge>
-                </div>
-                <h3 className="mt-3 break-words font-sans text-lg font-bold leading-snug text-maroon-950">{item.service_name}</h3>
-                <p className="mt-2 flex items-start gap-2 text-sm text-slate-500">
-                  <OfficeIcon />
-                  <span className="min-w-0 break-words">{item.office_name}</span>
-                </p>
-                <div className="mt-auto pt-4">
-                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 border-t border-[#EAE3D9] pt-3 text-sm text-slate-800">
-                    <ClockIcon />
-                    <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Standard</span>
-                    <span className="min-w-0 break-words font-semibold">{item.standard_text}</span>
-                  </div>
-                  <Link href={`/public/${encodeURIComponent(item.service_id)}`} className="mt-3 inline-block text-sm font-semibold text-maroon-800 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-maroon-700">
-                    View requirements &rarr;
-                  </Link>
-                </div>
-              </li>
-            ))}
-          </ul>
+          {list ? (
+            <ul className="space-y-3" data-testid="service-list">
+              {items.map((item) => (
+                <ServiceRow key={item.service_id} item={item} />
+              ))}
+            </ul>
+          ) : (
+            <ul className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3" data-testid="service-grid">
+              {items.map((item) => (
+                <ServiceCard key={item.service_id} item={item} />
+              ))}
+            </ul>
+          )}
           <div className="card mt-4">
-            <Pager page={page} pageSize={PAGE_SIZE} total={state.total} onPage={setPage} />
+            <Pager page={page} pageSize={pageSize} pageSizeOptions={PUBLIC_PAGE_SIZES} total={total} onPage={setPage} onPageSizeChange={changePageSize} loading={state.loading} className="border-t-0!" />
           </div>
         </>
       ) : null}
@@ -250,11 +398,11 @@ function PublicHome() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col bg-[#F7F3EC]">
+    <div className="flex min-h-screen flex-col bg-page">
       <section className="hero-bg relative text-white">
         <PublicHeader overlay />
         <div className="mx-auto max-w-3xl px-4 pb-28 pt-32 text-center sm:pt-36">
-          <h1 className="font-sans text-3xl font-bold leading-tight text-white sm:text-5xl">Find a service. Know what to bring and how long it takes.</h1>
+          <h1 className="font-serif text-4xl font-normal leading-tight text-white sm:text-5xl">Find a service. Know what to bring and how long it takes.</h1>
           <p className="mx-auto mt-5 max-w-xl text-white/90">Search the Citizen&rsquo;s Charter of {BRAND.campus} before you visit an office.</p>
           <form onSubmit={onSubmit} className="mx-auto mt-8 flex max-w-2xl overflow-hidden rounded-xl bg-white p-1.5 shadow-lg" role="search">
             <label className="sr-only" htmlFor="public-search">
@@ -311,15 +459,18 @@ function PublicHome() {
 }
 
 export default function Landing() {
-  // 'checking' until we know; visitors with no session marker are public at once (no network call).
-  const [mode, setMode] = useState(() => {
-    if (currentUser()) return 'signed-in';
-    return mightBeSignedIn() ? 'checking' : 'public';
-  });
+  // Keep the server render and the first browser render identical. Session state is browser-only,
+  // so choose the public or signed-in page after hydration in the effect below.
+  const [mode, setMode] = useState('checking');
 
   useEffect(() => {
     let cancelled = false;
-    const check = mightBeSignedIn() ? refreshSession() : Promise.resolve(null);
+    if (!mightBeSignedIn()) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- browser-only session check after hydration (see the comment above)
+      setMode('public');
+      return () => { cancelled = true; };
+    }
+    const check = refreshSession();
     check
       .then((user) => {
         if (!cancelled) setMode(user ? 'signed-in' : 'public');
@@ -334,5 +485,5 @@ export default function Landing() {
 
   if (mode === 'signed-in') return <SignedInHome />;
   if (mode === 'public') return <PublicHome />;
-  return <div className="min-h-screen bg-maroon-900" aria-busy="true" />;
+  return <div className="flex min-h-screen items-center justify-center text-sm text-slate-500" aria-busy="true">Checking your session…</div>;
 }

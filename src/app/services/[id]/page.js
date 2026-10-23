@@ -10,7 +10,9 @@ import ErrorBanner from '../../../components/feedback/ErrorBanner.js';
 import Modal from '../../../components/modals/Modal.js';
 import RowActionMenu from '../../../components/ui/RowActionMenu.js';
 import StatusBadge from '../../../components/ui/StatusBadge.js';
+import DateHint from '../../../components/forms/DateHint.js';
 import ServiceForm, { formToBody, serviceToForm } from '../../../components/forms/ServiceForm.js';
+import { formatDate } from '../../../lib/ui/date-format.js';
 import { CATALOGUE_API, DURATION_UNITS, classificationLabel, standardText } from '../../../lib/api/catalogue.js';
 import { apiFetch } from '../../../lib/auth/session.js';
 import { useFormDirty } from '../../../lib/ui/useFormDirty.js';
@@ -456,7 +458,7 @@ function ServiceDetail({ user, id }) {
                       </div>
                       <p className="mt-2 text-sm font-semibold text-slate-800">{standardText(s.duration_value, s.duration_unit)}</p>
                       <p className="mt-1 text-sm text-slate-700">
-                        {s.effective_from} &rarr; {s.effective_to ?? 'Open'}
+                        {formatDate(s.effective_from) || '-'} &rarr; {s.effective_to ? formatDate(s.effective_to) || '-' : 'Open'}
                       </p>
                       {s.charter_reference ? <p className="mt-1 text-xs text-slate-500">{s.charter_reference}</p> : null}
                     </li>
@@ -493,7 +495,8 @@ function ServiceDetail({ user, id }) {
                     <label className="label" htmlFor="std-from">
                       Effective from
                     </label>
-                    <input id="std-from" type="date" className="input" value={standard.effective_from} onChange={(e) => setStandard({ ...standard, effective_from: e.target.value })} required />
+                    <input id="std-from" type="date" className="input" value={standard.effective_from} onChange={(e) => setStandard({ ...standard, effective_from: e.target.value })} required aria-describedby="std-from-hint" />
+                    <DateHint id="std-from-hint" />
                     <FieldError errors={standardErrors} name="effective_from" />
                   </div>
                   <div>

@@ -15,6 +15,18 @@ const VARIANT_STYLES = {
   active: 'bg-emerald-50 text-emerald-700',
   inactive: 'bg-slate-100 text-slate-600',
 
+  // Transaction status variants
+  in_progress: 'bg-[#E8F1FC] text-[#1D5E9E]',
+  on_hold: 'bg-[#FFF4D9] text-[#9A6A00]',
+  completed: 'bg-emerald-50 text-emerald-700',
+  cancelled: 'bg-slate-100 text-slate-600',
+  auto_closed: 'bg-slate-100 text-slate-600',
+
+  // Compliance result variants (transaction detail)
+  compliant: 'bg-emerald-50 text-emerald-700',
+  breach: 'bg-red-50 text-red-700',
+  pending: 'bg-amber-50 text-amber-800',
+
   // System role variant
   role: 'bg-maroon-50 text-maroon-800',
 };

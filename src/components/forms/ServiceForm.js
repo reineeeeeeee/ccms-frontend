@@ -1,6 +1,10 @@
 'use client';
 
+import { useState } from 'react';
 import { CLASSIFICATIONS, DURATION_UNITS, TRANSACTION_TYPES } from '../../lib/api/catalogue.js';
+import { PROCEDURE_LIMIT, canUseStepEditor, procedureFields, procedureForBody, procedureProblem, toStepMode, toTextMode } from '../../lib/ui/procedure-steps.js';
+import DateHint from './DateHint.js';
+import ProcedureStepsEditor from './ProcedureStepsEditor.js';
 
 export const EMPTY_SERVICE_FORM = {
   office_id: '',
@@ -8,7 +12,11 @@ export const EMPTY_SERVICE_FORM = {
   service_name: '',
   classification: 'SIMPLE',
   transaction_type: 'G2C',
+  // Procedure: processing_steps is the text; procedure_mode/procedure_steps are the step editor's view of it
+  // (the editor is used only when the stored text round-trips exactly, see lib/ui/procedure-steps.js).
   processing_steps: '',
+  procedure_mode: 'steps',
+  procedure_steps: [],
   fees: '',
   who_may_avail: '',
   duration_value: '',
@@ -25,7 +33,7 @@ export function serviceToForm(service) {
     service_name: service.service_name,
     classification: service.classification,
     transaction_type: service.transaction_type,
-    processing_steps: service.processing_steps ?? '',
+    ...procedureFields(service.processing_steps),
     fees: service.fees ?? '',
     who_may_avail: service.who_may_avail ?? '',
   };
@@ -39,7 +47,8 @@ export function formToBody(form, withStandard) {
     service_name: form.service_name,
     classification: form.classification,
     transaction_type: form.transaction_type,
-    processing_steps: form.processing_steps.trim() === '' ? null : form.processing_steps,
+    // Step editor: the numbered text. Text box: exactly what is in it. Empty is no procedure.
+    processing_steps: procedureForBody(form),
     fees: form.fees.trim() === '' ? null : form.fees,
     who_may_avail: form.who_may_avail.trim() === '' ? null : form.who_may_avail,
   };
@@ -61,11 +70,26 @@ function FieldError({ errors, name }) {
 /** Add / edit service fields. The First Standard section only appears when adding. */
 export default function ServiceForm({ id, form, setForm, errors, offices, isNew, onSubmit }) {
   const set = (name) => (e) => setForm({ ...form, [name]: e.target.value });
+  const [procedureError, setProcedureError] = useState(null);
+  const stepMode = form.procedure_mode === 'steps';
+  const changeProcedure = (change) => {
+    setProcedureError(null);
+    setForm({ ...form, ...change });
+  };
+  function submit(event) {
+    const problem = procedureProblem(form);
+    if (problem) {
+      event.preventDefault();
+      setProcedureError(problem);
+      return;
+    }
+    onSubmit(event);
+  }
   // errors from the API may be keyed "standard.duration_value" or "duration_value"
   const err = (name) => errors?.[name] ?? errors?.[`standard.${name}`];
   const errFor = (name) => ({ [name]: err(name) });
   return (
-    <form id={id} onSubmit={onSubmit} className="space-y-4">
+    <form id={id} onSubmit={submit} className="space-y-4">
       <div>
         <label className="label" htmlFor={`${id}-office`}>
           Office
@@ -141,11 +165,52 @@ export default function ServiceForm({ id, form, setForm, errors, offices, isNew,
         </div>
       </div>
       <div>
-        <label className="label" htmlFor={`${id}-steps`}>
-          Procedure steps (reference only, plain text)
-        </label>
-        <textarea id={`${id}-steps`} className="input" rows={5} value={form.processing_steps} onChange={set('processing_steps')} maxLength={5000} />
-        <FieldError errors={errors} name="processing_steps" />
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <label className="label mb-0" htmlFor={stepMode ? `${id}-step-1` : `${id}-steps`} id={`${id}-steps-label`}>
+            Procedure steps (reference only, plain text)
+          </label>
+          {stepMode ? (
+            <button type="button" className="btn-link" onClick={() => changeProcedure(toTextMode(form))}>
+              Edit as text
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn-link"
+              disabled={!canUseStepEditor(form.processing_steps)}
+              onClick={() => changeProcedure(toStepMode(form))}
+            >
+              Use step editor
+            </button>
+          )}
+        </div>
+        {stepMode ? (
+          <div className="mt-2">
+            <ProcedureStepsEditor id={id} steps={form.procedure_steps} onChange={(steps) => changeProcedure({ procedure_steps: steps })} describedBy={procedureError || errors?.processing_steps ? `${id}-steps-error` : undefined} />
+          </div>
+        ) : (
+          <>
+            <textarea
+              id={`${id}-steps`}
+              className="input mt-2"
+              rows={5}
+              value={form.processing_steps}
+              onChange={(e) => changeProcedure({ processing_steps: e.target.value })}
+              maxLength={PROCEDURE_LIMIT}
+              aria-describedby={canUseStepEditor(form.processing_steps) ? undefined : `${id}-steps-hint`}
+            />
+            {!canUseStepEditor(form.processing_steps) ? (
+              <p id={`${id}-steps-hint`} className="mt-1 text-xs text-slate-500">
+                This text has sub-steps, locations, responsible persons or other formatting the step editor cannot keep exactly, so it stays as text.
+              </p>
+            ) : null}
+          </>
+        )}
+        {procedureError || errors?.processing_steps ? (
+          <p id={`${id}-steps-error`} role="alert" className="mt-1 text-xs text-red-700">
+            {procedureError ?? errors.processing_steps}
+          </p>
+        ) : null}
       </div>
 
       {isNew ? (
@@ -176,7 +241,8 @@ export default function ServiceForm({ id, form, setForm, errors, offices, isNew,
               <label className="label" htmlFor={`${id}-ef`}>
                 Effective from
               </label>
-              <input id={`${id}-ef`} type="date" className="input" value={form.effective_from} onChange={set('effective_from')} required />
+              <input id={`${id}-ef`} type="date" className="input" value={form.effective_from} onChange={set('effective_from')} required aria-describedby={`${id}-ef-hint`} />
+              <DateHint id={`${id}-ef-hint`} />
               <FieldError errors={errFor('effective_from')} name="effective_from" />
             </div>
             <div>

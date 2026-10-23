@@ -20,7 +20,7 @@ export const LOGIN_NOTICES = Object.freeze({
     'The server could not confirm that your session was ended. Your saved sign-in was removed from this page, but the session may still be active on the server. Choose "Try again" when the connection is back, or close the browser if this is a shared computer.',
 });
 
-export const SIGNED_OUT_URL = '/';
+export const SIGNED_OUT_URL = '/login';
 export const REVOKE_FALLBACK_URL = '/login?signed_out=1&notice=revoke_failed';
 
 /** The whitelisted notice code from a query string, or null. */

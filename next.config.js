@@ -6,6 +6,9 @@ const gatewayUrl = (process.env.API_GATEWAY_URL || 'http://127.0.0.1:8080').repl
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  experimental: {
+    agentUpgrade: 'security',
+  },
   poweredByHeader: false,
   reactStrictMode: true,
   // Hides the dev-only route badge. Compile and runtime errors are still shown by Next.js.

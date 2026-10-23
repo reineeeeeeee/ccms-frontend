@@ -3,12 +3,14 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { landingForRole, navForRole } from 'ccms-shared/nav';
+import { landingForRole } from 'ccms-shared/nav';
+import { activeNavHref, appNavForRole } from '../../lib/auth/permissions.js';
 import { ROLES, ROLE_LABELS } from 'ccms-shared/roles';
 import { BRAND } from '../../lib/constants/brand.js';
 import { ROLE_NOT_RECOGNIZED, ROLE_NOT_RECOGNIZED_MESSAGE, isRoleAllowed } from '../../lib/auth/guards.js';
 import { getAccessToken, redirectToLogin, refreshSession, sessionRejection } from '../../lib/auth/session.js';
 import { useSignOut } from '../../lib/auth/useSignOut.js';
+import Breadcrumb from '../navigation/Breadcrumb.js';
 import ConfirmDialog from '../dialogs/ConfirmDialog.js';
 import ErrorBanner from '../feedback/ErrorBanner.js';
 import BrandMark from '../ui/BrandMark.js';
@@ -60,7 +62,7 @@ function persistCollapsed(value) {
  * only the current role's pages. Pass allowedRoles to keep other roles off a page (the API still
  * enforces access on the server).
  */
-export default function AppShell({ title, subtitle, eyebrow, headerRight, allowedRoles, children }) {
+export default function AppShell({ title, subtitle, eyebrow, breadcrumb, headerRight, allowedRoles, pageClassName, titleClassName, subtitleClassName, children }) {
   const pathname = usePathname();
   const [state, setState] = useState(getInitialState);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -157,12 +159,13 @@ export default function AppShell({ title, subtitle, eyebrow, headerRight, allowe
 
   const { user } = state;
   // The shared nav calls the signed-in landing page "Home"; this app shows it as "Dashboard".
-  const nav = navForRole(user.role).map((item) => (item.href === '/' && item.label === 'Home' ? { ...item, label: 'Dashboard' } : item));
+  const nav = appNavForRole(user.role).map((item) => (item.href === '/' && item.label === 'Home' ? { ...item, label: 'Dashboard' } : item));
+  const activeHref = activeNavHref(nav, pathname);
   const sections = [...new Set(nav.map((item) => item.section))];
   const allowed = isRoleAllowed(user, allowedRoles);
 
   return (
-    <div className="min-h-screen lg:flex">
+    <div className="min-h-screen bg-page lg:flex">
       {/* Geometry follows the reference screenshot (253px wide crop, 1x): 256px sidebar, 61px header,
           38px items on a 40px pitch, 12px free space on the right, active bar flush with the left edge. */}
       <aside
@@ -221,7 +224,7 @@ export default function AppShell({ title, subtitle, eyebrow, headerRight, allowe
                   {nav
                     .filter((item) => item.section === section)
                     .map((item) => {
-                      const active = pathname === item.href || (item.href !== '/' && pathname.startsWith(`${item.href}/`));
+                      const active = item.href === activeHref;
                       return (
                         <li key={item.href}>
                           <Link
@@ -266,13 +269,13 @@ export default function AppShell({ title, subtitle, eyebrow, headerRight, allowe
         </div>
       </aside>
 
-      <div className="min-w-0 flex-1">
+      <div className={`min-w-0 flex-1 ${pageClassName ?? ''}`.trim()}>
         <header className="flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 sm:px-8">
           <div className="flex items-center gap-3">
             <button type="button" className="btn-secondary px-3 py-1.5 lg:hidden" onClick={() => setMenuOpen((open) => !open)} aria-label="Toggle navigation" aria-expanded={menuOpen} aria-controls="app-sidebar">
               Menu
             </button>
-            <span className="text-base font-bold text-maroon-900">{title}</span>
+            {breadcrumb ? <Breadcrumb items={breadcrumb} className="text-base text-slate-800" /> : <span className="text-base font-bold text-slate-800">{title}</span>}
           </div>
           <RowActionMenu
             label={`Account menu for ${user.fullName}`}
@@ -303,8 +306,8 @@ export default function AppShell({ title, subtitle, eyebrow, headerRight, allowe
           <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
             <div>
               {eyebrow ? <div className="mb-2">{eyebrow}</div> : null}
-              <h1 className="text-3xl">{title}</h1>
-              {subtitle ? <p className="mt-1 text-sm text-slate-600">{subtitle}</p> : null}
+              <h1 className={titleClassName ?? 'text-3xl'}>{title}</h1>
+              {subtitle ? <p className={subtitleClassName ?? 'mt-1 text-sm text-slate-600'}>{subtitle}</p> : null}
             </div>
             {allowed && headerRight ? (typeof headerRight === 'function' ? headerRight(user) : headerRight) : null}
           </div>

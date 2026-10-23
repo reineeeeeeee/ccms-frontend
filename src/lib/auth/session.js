@@ -146,6 +146,41 @@ function identityUnavailable() {
   return new ApiError('The sign-in service is not available right now. Please try again in a few minutes.', { code: 'IDENTITY_UNAVAILABLE', status: 503 });
 }
 
+/** A wait in whole seconds as people read it: "59 seconds", "1 minute", "14 minutes 44 seconds". */
+export function formatWait(totalSeconds) {
+  const unit = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes === 0) return unit(seconds, 'second');
+  return seconds === 0 ? unit(minutes, 'minute') : `${unit(minutes, 'minute')} ${unit(seconds, 'second')}`;
+}
+
+const INVALID_CREDENTIALS_MESSAGE = 'Incorrect email or password';
+const SIGN_IN_UNAVAILABLE_MESSAGE = 'Sign-in is temporarily unavailable. Please try again in a few minutes.';
+
+/**
+ * Sign-in failures as the person sees them. 401: the generic credentials message. 429: Identity's own
+ * rate-limit wait (Retry-After, or the seconds in its message) shown through formatWait, and kept in
+ * seconds on the error. 5xx (503 SIGN_IN_UNAVAILABLE and anything else): a fixed safe message, never the server's text.
+ */
+async function signInError(response) {
+  if (response.status === 401) return new ApiError(INVALID_CREDENTIALS_MESSAGE, { code: 'INVALID_CREDENTIALS', status: 401 });
+  if (response.status >= 500) return new ApiError(SIGN_IN_UNAVAILABLE_MESSAGE, { code: 'SIGN_IN_UNAVAILABLE', status: response.status });
+  const error = await toApiError(response);
+  if (response.status !== 429) return error;
+  const wait = Number(response.headers.get('retry-after'));
+  // Identity words the wait in seconds; the header (or, failing that, that number) is shown in minutes.
+  const inMessage = error.code === 'RATE_LIMITED' ? Number(/in (\d+) seconds?\./.exec(error.message)?.[1]) : NaN;
+  const seconds = [wait, inMessage].find((n) => Number.isInteger(n) && n > 0);
+  const retryAfterSeconds = seconds;
+  const message = seconds
+    ? `Too many sign-in attempts. Try again in ${formatWait(seconds)}.`
+    : 'Too many sign-in attempts. Please wait a moment and try again.';
+  const limited = new ApiError(message, { code: 'RATE_LIMITED', status: 429, correlationId: error.correlationId });
+  limited.retryAfterSeconds = retryAfterSeconds;
+  return limited;
+}
+
 /** Keeps a new access token, unless its role is not recognized (then nothing is stored). */
 function storeToken(data) {
   accessToken = data.access_token;
@@ -218,7 +253,7 @@ export async function signIn(email, password) {
   } catch {
     throw networkError();
   }
-  if (!response.ok) throw await toApiError(response);
+  if (!response.ok) throw await signInError(response);
   if (!storeToken(await response.json())) {
     throw new ApiError(ROLE_NOT_RECOGNIZED_MESSAGE, { code: ROLE_NOT_RECOGNIZED, status: 403 });
   }
@@ -241,7 +276,7 @@ export async function revokeServerSession() {
 /**
  * Signs out now (no confirmation; the Sign out button confirms first through useSignOut). Revokes the
  * server session, clears the saved token and does a full page load, which also drops in-memory state.
- * Signed out: the public home page. If Identity could not confirm, the sign-in page retries the
+ * Signed out: the sign-in page (not the public home page). If Identity could not confirm, the sign-in page retries the
  * revocation (?signed_out=1) and says so if that fails too (&notice=revoke_failed), so the person is
  * never silently kept in. Never rejects.
  */
@@ -278,7 +313,9 @@ export async function apiFetch(path, { method = 'GET', body, headers } = {}, ret
   }
 
   if (response.status === 401 && !retried) {
-    clearToken();
+    // Forget only the token that was refused. If a concurrent request already replaced it, keep the
+    // new one so the retry reuses it instead of starting another refresh.
+    if (token === accessToken) clearToken();
     return apiFetch(path, { method, body, headers }, true);
   }
   if (response.status === 401) {

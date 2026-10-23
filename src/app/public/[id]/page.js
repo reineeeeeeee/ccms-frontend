@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import ErrorBanner from '../../../components/feedback/ErrorBanner.js';
 import PublicHeader from '../../../components/layout/PublicHeader.js';
@@ -22,7 +22,16 @@ import { parseDocumentNotes, parseProcedureSteps } from '../../../lib/ui/parsePr
 
 export default function PublicServiceDetail() {
   const { id } = useParams();
+  const router = useRouter();
   const [state, setState] = useState({ loading: true, service: null, error: null });
+
+  function backToServices(event) {
+    event.preventDefault();
+    const cameFromCatalogue = window.sessionStorage.getItem('ccms:catalogue-return') === '1';
+    window.sessionStorage.removeItem('ccms:catalogue-return');
+    if (cameFromCatalogue && window.history.length > 1) router.back();
+    else router.push('/');
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -42,10 +51,10 @@ export default function PublicServiceDetail() {
   const steps = service ? parseProcedureSteps(service.processing_steps) : null;
 
   return (
-    <div className="min-h-screen bg-[#F7F3EC]">
+    <div className="min-h-screen bg-slate-50">
       <PublicHeader />
       <main className="mx-auto max-w-6xl space-y-6 px-4 py-8">
-        <Link href="/" className="inline-flex items-center gap-2 rounded text-sm font-semibold text-maroon-800 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-maroon-700">
+        <Link href="/" onClick={backToServices} className="inline-flex items-center gap-2 rounded text-sm font-semibold text-maroon-800 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-maroon-700">
           <svg aria-hidden="true" viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="m12 4-6 6 6 6" />
           </svg>

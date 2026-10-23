@@ -11,12 +11,12 @@ import RowActionMenu from '../../components/ui/RowActionMenu.js';
 import StatusBadge from '../../components/ui/StatusBadge.js';
 import ServiceForm, { EMPTY_SERVICE_FORM, formToBody, serviceToForm } from '../../components/forms/ServiceForm.js';
 import { toQuery } from '../../lib/api/client.js';
-import { CATALOGUE_API, CLASSIFICATIONS, classificationLabel, standardText } from '../../lib/api/catalogue.js';
+import { CATALOGUE_API, CLASSIFICATIONS, classificationLabel } from '../../lib/api/catalogue.js';
 import { apiFetch } from '../../lib/auth/session.js';
 import { useFormDirty } from '../../lib/ui/useFormDirty.js';
 
 const API = CATALOGUE_API;
-const PAGE_SIZE = 20;
+const DEFAULT_PAGE_SIZE = 20;
 
 function OfficePill({ user }) {
   const [office, setOffice] = useState(null);
@@ -43,6 +43,7 @@ function ServicesManager({ user }) {
   const [filters, setFilters] = useState({ search: '', office_id: '', classification: '', status: 'active' });
   const [applied, setApplied] = useState(filters);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [offices, setOffices] = useState([]);
   const [state, setState] = useState({ loading: true, items: [], total: 0, error: null });
   const [form, setForm] = useState(null); // { id?, ...fields }
@@ -60,18 +61,25 @@ function ServicesManager({ user }) {
   }, [ownOfficeOnly]);
 
   const reload = useCallback(async () => {
+    setState((s) => ({ ...s, loading: true, error: null }));
     try {
-      const query = toQuery({ ...applied, office_id: ownOfficeOnly ? undefined : applied.office_id, status: isAdmin ? applied.status : undefined, page, page_size: PAGE_SIZE });
+      const query = toQuery({ ...applied, office_id: ownOfficeOnly ? undefined : applied.office_id, status: isAdmin ? applied.status : undefined, page, page_size: pageSize });
       const data = await apiFetch(`${API}/services${query}`);
       setState({ loading: false, items: data.items, total: data.total, error: null });
     } catch (err) {
       setState((s) => ({ ...s, loading: false, error: err.message }));
     }
-  }, [applied, page, isAdmin, ownOfficeOnly]);
+  }, [applied, page, pageSize, isAdmin, ownOfficeOnly]);
 
   useEffect(() => {
     reload();
   }, [reload]);
+
+  // A new page size starts again at page 1; the filters stay as they are.
+  function changePageSize(size) {
+    setPageSize(size);
+    setPage(1);
+  }
 
   function applyFilters(next) {
     setFilters(next);
@@ -132,16 +140,6 @@ function ServicesManager({ user }) {
         />
       ),
     },
-    ...(ownOfficeOnly
-      ? []
-      : [
-        {
-          key: 'office',
-          header: 'OFFICE',
-          width: 110,
-          render: (s) => <span>{s.office_code}</span>,
-        },
-      ]),
     {
       key: 'classification',
       header: 'CLASSIFICATION',
@@ -151,22 +149,6 @@ function ServicesManager({ user }) {
           {classificationLabel(s.classification)}
         </StatusBadge>
       ),
-    },
-    {
-      key: 'current_standard',
-      header: 'CURRENT STANDARD',
-      width: 200,
-      render: (s) => {
-        if (!s.current_standard) return <span className="text-stone-400">—</span>;
-        if (s.current_standard.version_no) {
-          return <span>v{s.current_standard.version_no} · In force</span>;
-        }
-        return (
-          <span>
-            {standardText(s.current_standard.duration_value, s.current_standard.duration_unit) || 'In force'}
-          </span>
-        );
-      },
     },
     ...(isAdmin
       ? [
@@ -185,7 +167,7 @@ function ServicesManager({ user }) {
     {
       key: 'actions',
       header: 'ACTION',
-      width: 80,
+      width: 104,
       align: 'right',
       render: (s) => (
         <RowActionMenu
@@ -285,7 +267,7 @@ function ServicesManager({ user }) {
         columns={tableColumns}
         data={state.items}
         keyExtractor={(s) => s.service_id}
-        rowClassName={(s) => (s.is_active ? '' : 'bg-slate-50/70')}
+        rowClassName={(s) => (s.is_active ? '' : 'bg-table-hover')}
         loading={state.loading}
         loadingMessage="Loading services…"
         emptyMessage="No services match your filters."
@@ -294,9 +276,11 @@ function ServicesManager({ user }) {
         countLabel="services"
         pagination={{
           page,
-          pageSize: PAGE_SIZE,
+          pageSize,
           total: state.total,
           onPage: setPage,
+          onPageSizeChange: changePageSize,
+          loading: state.loading,
         }}
       />
 

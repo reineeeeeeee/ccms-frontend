@@ -15,11 +15,11 @@ const ITEM_CLASS =
  * (for example View), any other item renders as a button that calls `onSelect`.
  * The menu is positioned with `fixed` so the table's overflow clipping never cuts it off.
  * Callers decide which items a user may see; pass an empty list to render nothing.
- * `vertical` draws the dots top to bottom; `onDark` styles the trigger for a dark (maroon) background.
+ * `vertical` draws the dots top to bottom.
  * `trigger` replaces the dots with custom content (with `triggerClassName` for the button), and
  * `buttonRef` lets the caller keep a ref to the trigger, for example to return focus to it.
  */
-export default function RowActionMenu({ items, label = 'Row actions', vertical = false, onDark = false, trigger = null, triggerClassName = null, buttonRef: externalRef = null }) {
+export default function RowActionMenu({ items, label = 'Row actions', vertical = false, trigger = null, triggerClassName = null, buttonRef: externalRef = null }) {
   const [pos, setPos] = useState(null); // { top, left } when open
   const ownRef = useRef(null);
   const buttonRef = externalRef ?? ownRef;
@@ -103,11 +103,7 @@ export default function RowActionMenu({ items, label = 'Row actions', vertical =
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
         onClick={toggle}
-        className={triggerClassName ?? `inline-flex h-8 w-8 items-center justify-center rounded-full focus:outline-none focus-visible:ring-2 ${
-          onDark
-            ? 'text-white/85 hover:bg-white/15 hover:text-white focus-visible:ring-[#E5B53A]'
-            : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900 focus-visible:ring-maroon-700'
-        }`}
+        className={triggerClassName ?? 'row-icon-button'}
       >
         {trigger ?? (
         <svg viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5" aria-hidden="true">

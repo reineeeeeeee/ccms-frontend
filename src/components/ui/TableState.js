@@ -4,7 +4,7 @@ export default function TableState({ colSpan, kind = 'empty', children }) {
   const tone = kind === 'error' ? 'text-red-700' : 'text-slate-500';
   return (
     <tr>
-      <td className={`td ${tone}`} colSpan={colSpan}>
+      <td className={`td text-center ${tone}`} colSpan={colSpan}>
         {kind === 'loading' ? (
           <span className="inline-flex items-center gap-3">
             <span aria-hidden="true" className="h-2 w-16 animate-pulse rounded-full bg-slate-200" />

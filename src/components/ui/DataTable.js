@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import Pager from '../navigation/Pager.js';
+import TableShell, { Table, Th } from './TableShell.js';
 import TableState from './TableState.js';
 
 /**
@@ -89,14 +91,10 @@ export function TruncatedCell({
 }
 
 /**
- * Reusable CCMS DataTable presentation component.
- * Recreates the desktop table UI based on the Citizen's Charter visual standard:
- * - White container with rounded warm beige borders.
- * - Summary count bar above the table.
- * - Deep maroon (#3D0606, same as the sidebar) table header with white uppercase labels.
- * - Horizontal light beige dividers with comfortable row height.
- * - Responsive table scroll container for tablet and mobile viewports.
- * - Reusable pagination footer.
+ * Column-driven table for the lists that need little more than a header and rows (the Service Catalogue).
+ * It is a thin layer over the shared table design: <TableShell>, <Table>, <Th> and <Pager> decide how it looks,
+ * so it looks like every other CCMS table. This component only maps columns and rows onto them and adds the optional
+ * summary bar. columns: [{ key, header, width?, align?, className?, headerClassName?, render?(item, index) }].
  */
 export default function DataTable({
   columns = [],
@@ -112,37 +110,26 @@ export default function DataTable({
   countLabel = 'records',
   summaryLeftSlot = null,
   summaryRightSlot = null,
-  pagination = null, // { page, pageSize, total, onPage }
+  pagination = null, // { page, pageSize, total, onPage, onPageSizeChange, pageSizeOptions, loading }
+  minWidth = '35rem',
   className = '',
 }) {
   const hasSummary = summaryText || summaryLeftSlot || totalCount !== null || summaryRightSlot;
   const colCount = columns.length;
-
-  // Pagination calculation matching existing CCMS logic
-  const page = pagination?.page ?? 1;
-  const pageSize = pagination?.pageSize ?? 20;
-  const total = pagination?.total ?? data.length;
-  const onPage = pagination?.onPage;
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const alignClass = (col) => (col.align === 'right' ? 'text-right' : col.align === 'center' ? 'text-center' : 'text-left');
 
   return (
-    <div className={`rounded-2xl border border-[#EAE3D9] bg-white overflow-hidden shadow-none ${className}`.trim()}>
-      {/* Optional Summary Bar above header */}
+    <TableShell className={className} footer={pagination ? <Pager {...pagination} loading={loading || pagination.loading} /> : null}>
+      {/* Optional summary bar above the header */}
       {hasSummary ? (
-        <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-[#F2ECE4]">
-          <div className="text-sm text-stone-600">
-            {summaryLeftSlot ?? (summaryText ? <p>{summaryText}</p> : null)}
-          </div>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3.5">
+          <div className="text-sm text-stone-600">{summaryLeftSlot ?? (summaryText ? <p>{summaryText}</p> : null)}</div>
           <div>
             {summaryRightSlot ?? (
               totalCount !== null ? (
                 <div className="text-right">
-                  <span className="block text-base font-bold text-stone-900 leading-tight">
-                    {totalCount}
-                  </span>
-                  <span className="block text-xs text-stone-500 leading-tight">
-                    {countLabel}
-                  </span>
+                  <span className="block text-base font-bold leading-tight text-stone-900">{totalCount}</span>
+                  <span className="block text-xs leading-tight text-stone-500">{countLabel}</span>
                 </div>
               ) : null
             )}
@@ -150,102 +137,42 @@ export default function DataTable({
         </div>
       ) : null}
 
-      {/* Responsive Table Scroll Container */}
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[760px] table-fixed text-left border-collapse">
-          <thead className="table-head">
-            <tr>
-              {columns.map((col) => {
-                const alignClass =
-                  col.align === 'right'
-                    ? 'text-right'
-                    : col.align === 'center'
-                      ? 'text-center'
-                      : 'text-left';
-
-                return (
-                  <th
-                    key={col.key || col.header}
-                    scope="col"
-                    style={col.width ? { width: col.width } : undefined}
-                    className={`px-6 py-3.5 text-xs font-bold uppercase tracking-wider text-white ${alignClass} ${col.headerClassName || ''}`}
-                  >
-                    {col.header}
-                  </th>
-                );
-              })}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-[#F2ECE4] bg-white">
-            {error ? (
-              <TableState colSpan={colCount} kind="error">{error}</TableState>
-            ) : loading ? (
-              <TableState colSpan={colCount} kind="loading">{loadingMessage}</TableState>
-            ) : data.length === 0 ? (
-              <TableState colSpan={colCount}>{emptyMessage}</TableState>
-            ) : (
-              data.map((item, idx) => {
-                const key = keyExtractor(item, idx);
-                const customRowClass = typeof rowClassName === 'function' ? rowClassName(item, idx) : rowClassName;
-
-                return (
-                  <tr
-                    key={key}
-                    className={`hover:bg-[#FAF7F2]/50 transition-colors ${customRowClass}`.trim()}
-                  >
-                    {columns.map((col) => {
-                      const alignClass =
-                        col.align === 'right'
-                          ? 'text-right'
-                          : col.align === 'center'
-                            ? 'text-center'
-                            : 'text-left';
-
-                      return (
-                        <td
-                          key={col.key || col.header}
-                          className={`px-6 py-4 text-sm text-slate-700 align-middle ${alignClass} ${col.className || ''}`}
-                        >
-                          {col.render ? col.render(item, idx) : item[col.key]}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Pagination Footer */}
-      {pagination && total > 0 ? (
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#F2ECE4] px-6 py-3.5 text-sm">
-          <div className="text-xs text-stone-500 font-medium leading-tight">
-            Page
-            <div className="text-sm font-semibold text-stone-900">{page}</div>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              disabled={page <= 1}
-              onClick={() => onPage?.(page - 1)}
-              className="rounded-xl border border-[#E5DDD3] bg-white px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#800000] disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              Previous
-            </button>
-            <button
-              type="button"
-              disabled={page >= totalPages}
-              onClick={() => onPage?.(page + 1)}
-              className="rounded-xl border border-[#E5DDD3] bg-white px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#800000] disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              Next
-            </button>
-          </div>
-        </div>
-      ) : null}
-    </div>
+      <Table
+        className="table-fixed"
+        minWidth={minWidth}
+        busy={loading}
+        head={
+          <tr>
+            {columns.map((col) => (
+              <Th key={col.key || col.header} style={col.width ? { width: col.width } : undefined} className={`${alignClass(col)} ${col.headerClassName || ''}`.trim()}>
+                {col.header}
+              </Th>
+            ))}
+          </tr>
+        }
+      >
+        {error ? (
+          <TableState colSpan={colCount} kind="error">{error}</TableState>
+        ) : loading ? (
+          <TableState colSpan={colCount} kind="loading">{loadingMessage}</TableState>
+        ) : data.length === 0 ? (
+          <TableState colSpan={colCount}>{emptyMessage}</TableState>
+        ) : (
+          data.map((item, idx) => {
+            const customRowClass = typeof rowClassName === 'function' ? rowClassName(item, idx) : rowClassName;
+            return (
+              <tr key={keyExtractor(item, idx)} className={`tr-row ${customRowClass || ''}`.trim()}>
+                {columns.map((col) => (
+                  <td key={col.key || col.header} className={`td ${alignClass(col)} ${col.className || ''}`.trim()}>
+                    {col.render ? col.render(item, idx) : item[col.key]}
+                  </td>
+                ))}
+              </tr>
+            );
+          })
+        )}
+      </Table>
+    </TableShell>
   );
 }
 

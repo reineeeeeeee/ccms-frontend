@@ -25,6 +25,14 @@ const SHAPES = {
       <path d="M8 3v4M16 3v4M3 10h18" />
     </>
   ),
+  receipt: (
+    <>
+      <path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Z" />
+      <path d="M9 8h6M9 12h6M9 16h3" />
+    </>
+  ),
+  list: <path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01" />,
+  sliders: <path d="M4 7h9M17 7h3M4 17h3M11 17h9M13 4v6M7 14v6" />,
   dot: <circle cx="12" cy="12" r="3" />,
 };
 
@@ -37,6 +45,9 @@ const ICON_BY_HREF = {
   '/offices': 'building',
   '/services': 'layers',
   '/calendar': 'calendar',
+  '/settings': 'sliders',
+  '/logs': 'list',
+  '/transactions': 'receipt',
 };
 
 export default function NavIcon({ href }) {
