@@ -1,5 +1,6 @@
 'use client';
 
+import { RequiredMark } from '../../components/forms/Field.js';
 import { useCallback, useEffect, useState } from 'react';
 import { ROLES } from 'ccms-shared/roles';
 import ConfirmDialog from '../../components/dialogs/ConfirmDialog.js';
@@ -41,7 +42,7 @@ export default function Counters({ user, canWrite }) {
     if (ownOffice) {
       if (!user.officeId) return undefined;
       apiFetch(`${OFFICES_API}/${encodeURIComponent(user.officeId)}`)
-        .then((data) => !cancelled && setOwnOfficeName(data.office ? `${data.office.office_code} · ${data.office.office_name}` : null))
+        .then((data) => !cancelled && setOwnOfficeName(data.office ? data.office.office_name : null))
         .catch(() => !cancelled && setOwnOfficeName(null)); // the name is only a label
       return () => {
         cancelled = true;
@@ -113,7 +114,7 @@ export default function Counters({ user, canWrite }) {
     }
   }
 
-  const officeName = (o) => `${o.office_code} · ${o.office_name}${o.is_active ? '' : ' (inactive)'}`;
+  const officeName = (o) => `${o.office_name}${o.is_active ? '' : ' (inactive)'}`;
   const noOffice = ownOffice && !user.officeId;
   const columns = canWrite ? 3 : 2;
   const rows = list.officeId === officeId ? list.items : [];
@@ -227,8 +228,7 @@ export default function Counters({ user, canWrite }) {
             <ErrorBanner message={formError} />
             <div>
               <label className="label" htmlFor="counter_label">
-                Counter label
-              </label>
+                Counter label<RequiredMark /></label>
               <input
                 id="counter_label"
                 className="input"

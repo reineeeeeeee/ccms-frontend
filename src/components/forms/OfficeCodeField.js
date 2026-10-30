@@ -1,64 +1,52 @@
 'use client';
 
 import { OFFICE_CODE_MAX, composeOfficeCode } from '../../lib/ui/office-code.js';
+import { RequiredMark } from './Field.js';
 
 /**
- * The Office code input of the Add and Edit Office form.
- * - No prefix (today): the plain, full-code input.
- * - With a prefix: the institution prefix as fixed text ("PUP-") joined to an input for the office part
- *   ("OSAS"), and the full code underneath. An existing code without the prefix (not re-coded yet) is
- *   shown whole and unchanged, so saving never writes the prefix twice.
- * `value` is the office part when there is a prefix and the whole code otherwise. `legacy` marks an existing
- * code that does not start with the prefix: it is shown whole, as the plain input.
+ * The Office code input of the Add and Edit Office form: the institution code as fixed text ("PUP-") joined to an input for the
+ * office part ("OSAS"), and the full code that will result underneath ("PUP-OSAS"). Core builds the real code from the part, so
+ * this is a preview. `value` is the office part. `currentCode` (Edit, when the saved code does not start with the institution
+ * code yet) is shown as a note, because that office has no separate part to fill in.
  */
-export default function OfficeCodeField({ id = 'office_code', prefix = null, legacy = false, value, onChange, error, autoFocus = false }) {
-  const separate = Boolean(prefix) && !legacy;
-  const maxLength = separate ? Math.max(1, OFFICE_CODE_MAX - prefix.length - 1) : OFFICE_CODE_MAX;
+export default function OfficeCodeField({ id = 'office_code', prefix, value, onChange, error, currentCode = null, autoFocus = false }) {
+  const maxLength = Math.max(1, OFFICE_CODE_MAX - prefix.length - 1);
   const errorId = `${id}-error`;
+  const fullId = `${id}-full`;
   return (
     <div>
       <label className="label" htmlFor={id}>
         Office code
+        <RequiredMark />
       </label>
-      {separate ? (
-        <div className="flex items-stretch">
-          <span className="inline-flex items-center rounded-l-md border border-r-0 border-slate-300 bg-slate-100 px-3 text-sm font-semibold text-slate-700" data-testid="office-code-prefix">
-            {prefix}-
-          </span>
-          <input
-            id={id}
-            className="input rounded-l-none"
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            required
-            maxLength={maxLength}
-            autoFocus={autoFocus}
-            autoComplete="off"
-            aria-invalid={error ? true : undefined}
-            aria-describedby={error ? errorId : `${id}-full`}
-          />
-        </div>
-      ) : (
+      <div className="flex items-stretch">
+        <span className="inline-flex shrink-0 items-center rounded-l-md border border-r-0 border-slate-300 bg-slate-100 px-3 text-sm font-semibold text-slate-700" data-testid="office-code-prefix" aria-label={`Institution code ${prefix}, fixed`}>
+          {prefix}-
+        </span>
         <input
           id={id}
-          className="input"
+          className="input min-w-0 rounded-l-none uppercase"
           value={value}
-          onChange={(e) => onChange(e.target.value)}
-          required
-          maxLength={OFFICE_CODE_MAX}
+          onChange={(e) => onChange(e.target.value.toUpperCase())}
+          maxLength={maxLength}
           autoFocus={autoFocus}
           autoComplete="off"
+          placeholder="e.g. OSAS"
+          aria-required="true"
           aria-invalid={error ? true : undefined}
-          aria-describedby={error ? errorId : undefined}
+          aria-describedby={error ? `${errorId} ${fullId}` : fullId}
         />
-      )}
-      {separate ? (
-        <p id={`${id}-full`} className="mt-1 text-xs text-slate-500" aria-live="polite">
-          Full code: <span className="font-semibold text-slate-700">{composeOfficeCode(prefix, value) || `${prefix}-`}</span>
+      </div>
+      <p id={fullId} className="mt-1 text-xs text-slate-500" aria-live="polite">
+        Full office code: <span className="font-semibold text-slate-700" data-testid="office-code-preview">{composeOfficeCode(prefix, value) || `${prefix}-`}</span>
+      </p>
+      {currentCode ? (
+        <p className="mt-1 text-xs text-slate-500">
+          This office is saved as <span className="font-semibold text-slate-700">{currentCode}</span>, which does not start with {prefix}. Enter the office part to give it a full code.
         </p>
       ) : null}
       {error ? (
-        <p id={errorId} className="mt-1 text-xs text-red-700">
+        <p id={errorId} role="alert" className="mt-1 text-xs font-medium text-red-700">
           {error}
         </p>
       ) : null}

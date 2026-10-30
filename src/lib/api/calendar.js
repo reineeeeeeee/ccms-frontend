@@ -104,3 +104,76 @@ export function normalizeTime(text) {
 }
 
 export const SYNC_LABELS = { PENDING: 'Pending', SENT: 'Sent', ACKNOWLEDGED: 'Acknowledged', FAILED: 'Failed' };
+
+// ---- Class suspensions (CC015): which part of the campus a calendar entry affects ----
+// Core fields: applies_to (BOTH | CLASSES | WORK, default BOTH) and class_mode (SUSPENDED | ONLINE, or null for WORK only).
+// They are only accepted while the setting applies_to_enabled is on; while it is off Core refuses any class_mode and any applies_to
+// other than BOTH, so the form then sends neither and every entry stays BOTH. class_mode never changes working minutes (Core's engine).
+
+export const APPLIES_TO = [
+  { value: 'BOTH', label: 'Offices and classes', short: 'O+C', help: 'Offices are closed and classes are affected.' },
+  { value: 'CLASSES', label: 'Classes only', short: 'C', help: 'Classes are affected; offices stay open.' },
+  { value: 'WORK', label: 'Offices only', short: 'O', help: 'Offices are closed; classes continue.' },
+];
+export const CLASS_MODES = [
+  { value: 'SUSPENDED', label: 'No classes' },
+  { value: 'ONLINE', label: 'Online' },
+];
+export const APPLIES_TO_ERROR = 'Choose Offices and classes, Classes only or Offices only.';
+export const CLASS_MODE_ERROR = 'Choose No classes or Online.';
+export const CLASS_MODE_WORK_ERROR = 'Classes are not affected when an entry applies to offices only.';
+
+export const appliesToLabel = (value) => APPLIES_TO.find((a) => a.value === value)?.label ?? value;
+export const appliesToShort = (value) => APPLIES_TO.find((a) => a.value === value)?.short ?? '';
+export const classModeLabel = (value) => CLASS_MODES.find((c) => c.value === value)?.label ?? '';
+
+/** "Classes only · No classes", "Offices and classes · Online", "Offices only" (class mode only where classes are affected). */
+export function describeEffect(entry) {
+  const applies = entry?.applies_to ?? 'BOTH';
+  const mode = applies === 'WORK' ? '' : classModeLabel(entry?.class_mode);
+  return mode ? `${appliesToLabel(applies)} · ${mode}` : appliesToLabel(applies);
+}
+
+/** The class mode that goes with an Applies to choice: none for offices only; otherwise the current one, or No classes by default. */
+export function classModeFor(appliesTo, current) {
+  if (appliesTo === 'WORK') return '';
+  return CLASS_MODES.some((c) => c.value === current) ? current : 'SUSPENDED';
+}
+
+/** Early feedback on the combination (Core checks again). Returns { applies_to?, class_mode? }; empty when valid or when the setting is off. */
+export function appliesToErrors(enabled, appliesTo, classMode) {
+  if (!enabled) return {};
+  const errors = {};
+  if (!APPLIES_TO.some((a) => a.value === appliesTo)) errors.applies_to = APPLIES_TO_ERROR;
+  else if (appliesTo === 'WORK') {
+    if (classMode) errors.class_mode = CLASS_MODE_WORK_ERROR;
+  } else if (!CLASS_MODES.some((c) => c.value === classMode)) errors.class_mode = CLASS_MODE_ERROR;
+  return errors;
+}
+
+/**
+ * The applies_to part of a create or edit body. While the setting is off: nothing (Core refuses any class_mode and any value other
+ * than BOTH, and keeps BOTH). While it is on: both fields, class_mode null for offices only, so an edit never falls back to a default.
+ */
+export function appliesToBody(enabled, appliesTo, classMode) {
+  if (!enabled) return {};
+  return { applies_to: appliesTo, class_mode: appliesTo === 'WORK' ? null : classMode };
+}
+
+/** What the form starts with for a saved entry: its real values (older entries come back as BOTH), never a guess. */
+export function formAppliesTo(entry) {
+  const appliesTo = APPLIES_TO.some((a) => a.value === entry?.applies_to) ? entry.applies_to : 'BOTH';
+  return { applies_to: appliesTo, class_mode: appliesTo === 'WORK' ? '' : classModeFor(appliesTo, entry?.class_mode) };
+}
+
+/** Entries that fall under an Applies to filter ('' = all). The service filters too (?applies_to=); this keeps the day markers in step. */
+export const matchesAppliesTo = (entry, filter) => !filter || (entry.applies_to ?? 'BOTH') === filter;
+
+/** Core's answers to a failed settings change as { message }, with its own words for the case it explains. */
+export function settingsErrorMessage(err) {
+  if (err?.status === 403) return 'Only a Super Admin can change this setting.';
+  if (err?.status === 409 && err?.code === 'CALENDAR_SETTING_IN_USE') return err.message;
+  if (err?.code === 'NETWORK_ERROR') return err.message;
+  if (err?.status >= 500) return 'The setting could not be saved right now. Please try again in a few minutes.';
+  return err?.message ?? 'The setting could not be saved. Please try again.';
+}

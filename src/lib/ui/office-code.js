@@ -1,16 +1,16 @@
-// Rules for office codes and the institution prefix (TT6, "PUP-OSAS"), as pure functions so they can be
-// tested directly. The Core service owns the real rules: it stores the full code, keeps it unique in any
-// letter case and limits it to 20 characters. Nothing here changes a code in the data; it only builds
-// the full code to send and explains the service's answers.
-//
-// The institution prefix is NOT available yet: Core has no institution code (no field, no endpoint; its
-// own notes list "TT6 institution and office codes" as not implemented). Until it exists, OFFICE_CODE_PREFIX
-// stays null and the Offices form keeps the plain, full-code input it has always had.
-
-/** The institution prefix the Offices form shows as fixed text, or null while Core cannot supply one. */
-export const OFFICE_CODE_PREFIX = null;
+// Rules for office codes and the institution prefix (CC006, "PUP-OSAS"), as pure functions so they can be tested directly.
+// The Core service owns the real rules. It keeps the institution code (GET and PUT /api/catalogue/catalogue-settings), and it BUILDS
+// the office code itself: a create or edit sends the office part as office_abbr (not a full office_code, which it rejects), and Core
+// answers with the full code "INSTITUTION-PART". Core keeps it unique in any letter case and at most 20 characters, and refuses to
+// change the institution code once it is set. Nothing here changes a code in the data: it shows the full code as a preview, checks
+// the office part early, and explains the service's answers.
 
 export const OFFICE_CODE_MAX = 20;
+export const OFFICE_PART_PATTERN = /^[A-Z0-9]+$/;
+export const OFFICE_PART_MESSAGE = 'The office part can only have letters and digits (no spaces or symbols).';
+export const INSTITUTION_NOT_CONFIGURED_MESSAGE = 'The institution code has not been set yet. A Super Admin must set it first.';
+export const INSTITUTION_IMMUTABLE_MESSAGE = 'The institution code cannot be changed once it is set.';
+export const INSTITUTION_UNAVAILABLE_MESSAGE = 'The institution code could not be loaded, so offices cannot be added or edited right now.';
 export const CODE_TAKEN_MESSAGE = 'Office code already exists';
 export const NAME_TAKEN_MESSAGE = 'Office name already exists';
 export const INSTITUTION_CODE_MESSAGE = 'Institution code must be 2 to 10 uppercase letters or digits (for example PUP).';
@@ -46,7 +46,8 @@ export function officePart(prefix, code) {
 /** Early feedback on the office part; Core checks again. Resolves to a message or null. */
 export function officeCodeProblem(prefix, part) {
   const text = String(part ?? '').trim();
-  if (!text) return 'Office code is required';
+  if (!text) return 'Enter the office part, for example OSAS.';
+  if (!OFFICE_PART_PATTERN.test(text.toUpperCase())) return OFFICE_PART_MESSAGE;
   const full = composeOfficeCode(prefix, text);
   if (full.length > OFFICE_CODE_MAX) {
     const room = prefix ? Math.max(0, OFFICE_CODE_MAX - String(prefix).length - 1) : OFFICE_CODE_MAX;
@@ -55,11 +56,22 @@ export function officeCodeProblem(prefix, part) {
   return null;
 }
 
-/** A failed office save as { fieldErrors, message }: field messages go under their inputs, message in the form's banner. */
+/**
+ * A failed office save as { fieldErrors, message }: field messages go under their inputs (the form's "office_code" field is the
+ * office part), message in the form's banner. Core's answers: 409 OFFICE_CODE_EXISTS / OFFICE_NAME_EXISTS (details by field),
+ * 409 OFFICE_CODE_CHANGE_NEEDS_DECISION (details.office_abbr), 409 INSTITUTION_NOT_CONFIGURED, 400 with details.office_abbr or
+ * office_name, and 403.
+ */
 export function officeSaveError(err, prefix = null) {
   const status = err?.status;
   const details = err?.details && typeof err.details === 'object' ? err.details : null;
   const fieldErrors = {};
+  const limit = prefix ? `, so the office part can be at most ${OFFICE_CODE_MAX - prefix.length - 1}` : '';
+  if (status === 409 && err.code === 'INSTITUTION_NOT_CONFIGURED') return { fieldErrors, message: INSTITUTION_NOT_CONFIGURED_MESSAGE };
+  if (status === 409 && err.code === 'OFFICE_CODE_CHANGE_NEEDS_DECISION') {
+    fieldErrors.office_code = details?.office_abbr ?? err.message;
+    return { fieldErrors, message: err.message };
+  }
   if (status === 409) {
     if (err.code === 'OFFICE_NAME_EXISTS' && !details?.office_code) fieldErrors.office_name = NAME_TAKEN_MESSAGE;
     else fieldErrors.office_code = CODE_TAKEN_MESSAGE;
@@ -67,10 +79,11 @@ export function officeSaveError(err, prefix = null) {
     return { fieldErrors, message: null };
   }
   if (status === 400 && details) {
-    if (details.office_code) {
-      fieldErrors.office_code = /20 characters/.test(String(details.office_code))
-        ? `Office codes can be at most ${OFFICE_CODE_MAX} characters including the hyphen${prefix ? `, so the office part can be at most ${OFFICE_CODE_MAX - prefix.length - 1}` : ''}.`
-        : String(details.office_code);
+    const codeProblem = details.office_abbr ?? details.office_code;
+    if (codeProblem) {
+      fieldErrors.office_code = /20 characters/.test(String(codeProblem))
+        ? `Office codes can be at most ${OFFICE_CODE_MAX} characters including the institution code and the hyphen${limit}.`
+        : String(codeProblem);
     }
     if (details.office_name) fieldErrors.office_name = String(details.office_name);
     if (details.institution_code) fieldErrors.institution_code = INSTITUTION_CODE_MESSAGE;
@@ -80,4 +93,20 @@ export function officeSaveError(err, prefix = null) {
   if (err?.code === 'NETWORK_ERROR') return { fieldErrors, message: err.message };
   if (status >= 500) return { fieldErrors, message: SERVER_ERROR_MESSAGE };
   return { fieldErrors, message: err?.message ?? 'Something went wrong. Please try again.' };
+}
+
+/** The body Core expects for an office create or edit: the office part as office_abbr (Core upper-cases it and builds the full code). */
+export function officeRequestBody(part, officeName) {
+  return { office_abbr: String(part ?? '').trim().toUpperCase(), office_name: officeName };
+}
+
+/** The institution-code save error as { fieldErrors, message }. */
+export function institutionSaveError(err) {
+  const status = err?.status;
+  if (status === 400 && err?.details?.institution_code) return { fieldErrors: { institution_code: INSTITUTION_CODE_MESSAGE }, message: null };
+  if (status === 409 && err?.code === 'INSTITUTION_CODE_IMMUTABLE') return { fieldErrors: { institution_code: INSTITUTION_IMMUTABLE_MESSAGE }, message: null };
+  if (status === 403) return { fieldErrors: {}, message: FORBIDDEN_MESSAGE };
+  if (err?.code === 'NETWORK_ERROR') return { fieldErrors: {}, message: err.message };
+  if (status >= 500) return { fieldErrors: {}, message: SERVER_ERROR_MESSAGE };
+  return { fieldErrors: {}, message: err?.message ?? 'Something went wrong. Please try again.' };
 }

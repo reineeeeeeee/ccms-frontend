@@ -11,7 +11,7 @@ export const CLIENT_TYPES = [
 
 export const STATUS_LABELS = {
   IN_PROGRESS: 'In progress',
-  ON_HOLD: 'On hold',
+  ON_HOLD: 'Pending', // display label only: the stored status value stays ON_HOLD
   COMPLETED: 'Completed',
   CANCELLED: 'Cancelled',
   AUTO_CLOSED: 'Auto-closed',
@@ -147,12 +147,12 @@ export function conflictTransaction(kind, open, userId) {
   return list[0] ?? null;
 }
 
-/** What the services in the picker are shown as: "Name (CODE)". */
-export const serviceOptionLabel = (service) => `${service.service_name} (${service.service_code})`;
+/** What the services in the picker are shown as: "Service name - Office name" (the name alone when the API sent no office name). */
+export const serviceOptionLabel = (service) => (service.office_name ? `${service.service_name} - ${service.office_name}` : service.service_name);
 
-/** The services matching the picker's search box (name, code or office), the order unchanged. */
+/** The services matching the picker's search box (name, code or office name/code), the order unchanged. */
 export function filterServices(services, search) {
   const text = String(search ?? '').trim().toLowerCase();
   if (!text) return services;
-  return services.filter((s) => `${s.service_name} ${s.service_code} ${s.office_code ?? ''}`.toLowerCase().includes(text));
+  return services.filter((s) => `${s.service_name} ${s.service_code} ${s.office_name ?? ''} ${s.office_code ?? ''}`.toLowerCase().includes(text));
 }

@@ -18,6 +18,7 @@ import {
   auditValueTree,
   buildNameMap,
   entityName,
+  resolveEntityName,
   entityTypeLabel,
   humanizeKey,
   searchProblem,
@@ -241,9 +242,11 @@ describe('the Logs page is read only and keeps its filters honest (source checks
   it('has no create, edit or delete control and sends no write request', () => {
     assert.doesNotMatch(page, /method\s*:|\bPOST\b|\bPUT\b|\bPATCH\b|\bDELETE\b|apiFetch\([^)]*,\s*\{/);
     assert.doesNotMatch(page, />\s*(Add|Edit|Delete|Remove|Save)\b/);
-    assert.equal([...page.matchAll(/apiFetch\(/g)].length, 2, 'only the office-name and account-name lookups use apiFetch directly, both plain GETs');
+    assert.equal([...page.matchAll(/apiFetch\(/g)].length, 1, 'only the office-name lookup calls apiFetch directly, a plain GET');
     assert.match(page, /apiFetch\(OFFICES_API\)/);
-    assert.match(page, /apiFetch\(`\$\{ACCOUNTS_API\}\?page_size=100`\)/);
+    // accounts and services are read with the paged GET helper (every page), for names only
+    assert.match(page, /fetchAllPages\(ACCOUNTS_API, apiFetch\)/);
+    assert.match(page, /fetchAllPages\(`\$\{CATALOGUE_API\}\/services`, apiFetch/);
   });
 
   it('a new search or date range, and Clear, start again at page 1; paging keeps the applied filters', () => {
@@ -253,9 +256,10 @@ describe('the Logs page is read only and keeps its filters honest (source checks
     assert.match(page, /function changePageSize\(value\)[\s\S]*?run\(applied, 1, appliedSearch, nextPageSize\)/);
   });
 
-  it('has the reference layout: one search box, two native dates, Apply filters, and the five columns plus the details control', () => {
-    assert.match(page, /placeholder="Search by user ID, action or entity"/);
-    assert.match(page, /filtered \? 'Clear filters' : 'Apply filters'/);
+  it('has the reference layout: one search box, two native dates, no Apply button, and the five columns plus the details control', () => {
+    assert.match(page, /<SearchInput\s+id="audit-search"/);
+    assert.doesNotMatch(page, /Apply filters/);
+    assert.match(page, /<ClearFiltersButton/);
     for (const heading of ['Date &amp; time', 'Done by', 'Action', 'Affected entity', 'Office']) assert.ok(page.includes(heading), heading);
     assert.match(page, /<Pager[\s\S]*?pageSize=\{pageSize\}[\s\S]*?onPageSizeChange=\{changePageSize\}/);
     assert.match(page, /A read-only record of changes made in CCMS, newest first\. Dates are Manila calendar days \(Asia\/Manila\)\./);
@@ -322,6 +326,19 @@ describe('names shown in the table (only from real data)', () => {
     assert.equal(entityName(event({ entity_type: 'office', after_value: { office_name: 'Campus Academic Office' } })), 'Campus Academic Office');
     assert.equal(entityName(event({ entity_type: 'counter', before_value: { label: 'Window 1' }, after_value: null })), 'Window 1');
     assert.equal(entityName(event({ after_value: { full_name: 'New' }, before_value: { full_name: 'Old' } })), 'New');
+  });
+
+  it('the entity_name sent by the Logs service wins, and a transaction shows its tracking number', () => {
+    assert.equal(entityName(event({ entity_type: 'service', entity_name: ' Transcript of Records ', after_value: { service_name: 'Other' } })), 'Transcript of Records');
+    assert.equal(entityName(event({ entity_type: 'transaction', entity_name: 'REG-20261030-0001' })), 'REG-20261030-0001');
+    assert.equal(entityName(event({ entity_type: 'transaction', after_value: { tracking_no: 'REG-20261030-0002', client_email: 'a@b.co' } })), 'REG-20261030-0002');
+  });
+
+  it('never shows citizen details', () => {
+    const tree = auditValueTree({ tracking_no: 'REG-20261030-0001', client_email: 'a@b.co', client_reference: '20-1234', student_number: '20-1234' });
+    const text = JSON.stringify(tree);
+    assert.ok(!text.includes('a@b.co') && !text.includes('20-1234'));
+    assert.ok(text.includes('REG-20261030-0001'));
   });
 
   it('gives nothing (so the page shows the ID) when the values hold no name', () => {
@@ -408,14 +425,43 @@ describe('the table and filter bar after the clean-up (source checks, not a brow
     assert.match(code, /setDraft\(\{ search: '', from: '', to: '' \}\);\s*setFieldErrors\(\{\}\);\s*run\(\{ \.\.\.EMPTY_AUDIT_FILTERS \}, 1, null\);/);
   });
 
-  it('switches the submit control to a clear action when applied filters exist', () => {
-    assert.match(code, /type=\{filtered \? 'button' : 'submit'\}/);
-    assert.match(code, /onClick=\{filtered \? clear : undefined\}/);
-    assert.match(code, /filtered \? 'Clear filters' : 'Apply filters'/);
+  it('has no Apply button: dates apply when chosen, the search on Enter or when the field is left, and Clear filters shows only while filters are applied', () => {
+    assert.match(code, /\{filtered \? \(/);
+    assert.match(code, /onClick=\{clear\}/);
+    assert.doesNotMatch(code, /Apply filters/);
+    assert.match(code, /function applyNow\(next\)/);
+    assert.ok(code.includes('applyNow({ ...draft, from: e.target.value })'));
+    assert.ok(code.includes('applyNow({ ...draft, to: e.target.value })'));
   });
 
   it('stays read only and Super Admin only', () => {
     assert.match(page, /allowedRoles=\{\[ROLES\.SUPER_ADMIN\]\}/);
     assert.doesNotMatch(code, /method\s*:|\bPOST\b|\bPUT\b|\bPATCH\b|\bDELETE\b/);
+  });
+});
+
+describe('names for older audit entries (FE-04)', () => {
+  const lookups = {
+    office: new Map([['o1', 'Registrar']]),
+    account: new Map([['a1', 'Liza Ramos']]),
+    service: new Map([['s1', 'Transcript of Records']]),
+  };
+  const ev = (over) => ({ entity_type: 'office', entity_id: 'o1', before_value: null, after_value: null, ...over });
+  it('uses the entry\'s own name first', () => {
+    assert.equal(resolveEntityName(ev({ entity_name: 'Own Name' }), lookups), 'Own Name');
+  });
+  it('looks an older entry up by type and ID in the lists already loaded', () => {
+    assert.equal(resolveEntityName(ev({}), lookups), 'Registrar');
+    assert.equal(resolveEntityName(ev({ entity_type: 'account', entity_id: 'a1' }), lookups), 'Liza Ramos');
+    assert.equal(resolveEntityName(ev({ entity_type: 'service', entity_id: 's1' }), lookups), 'Transcript of Records');
+  });
+  it('gives nothing when it cannot be resolved safely, so the page says the name is unavailable', () => {
+    assert.equal(resolveEntityName(ev({ entity_id: 'missing' }), lookups), '');
+    assert.equal(resolveEntityName(ev({ entity_type: 'service_standard', entity_id: 's1' }), lookups), '');
+    assert.equal(resolveEntityName(ev({ entity_type: 'counter', entity_id: 'c1' }), lookups), '');
+    assert.equal(resolveEntityName(ev({}), {}), '');
+  });
+  it('never resolves a transaction by ID', () => {
+    assert.equal(resolveEntityName(ev({ entity_type: 'transaction', entity_id: 'o1' }), lookups), '');
   });
 });

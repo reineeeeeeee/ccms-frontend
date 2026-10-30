@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { ROLE_LABELS } from 'ccms-shared/roles';
+import ConfirmDialog from '../../components/dialogs/ConfirmDialog.js';
 import ErrorBanner from '../../components/feedback/ErrorBanner.js';
 import { apiFetch } from '../../lib/auth/session.js';
 import { DAY_NAMES, DAY_SHORT, WEEK_ORDER, describeSchedule } from '../../lib/api/calendar.js';
@@ -34,6 +35,7 @@ export default function WorkingHours({ canWrite = false, onChanged }) {
   const [state, setState] = useState({ loading: true, rows: [], error: null });
   const [custom, setCustom] = useState(false); // different hours for different days
   const [saving, setSaving] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false); // "Save and publish?" before anything is sent
   const [message, setMessage] = useState(null);
   const [saveError, setSaveError] = useState(null);
   const [history, setHistory] = useState({ loading: canWrite, items: [], total: 0, error: null });
@@ -92,9 +94,16 @@ export default function WorkingHours({ canWrite = false, onChanged }) {
     setCustom(false);
   }
 
-  async function save(event) {
+  // The button only asks. The schedule is sent when the person confirms.
+  function save(event) {
     event.preventDefault();
-    if (!canWrite) return;
+    if (!canWrite || saving) return;
+    setConfirmOpen(true);
+  }
+
+  async function confirmSave() {
+    if (!canWrite || saving) return;
+    setConfirmOpen(false);
     setSaving(true);
     setSaveError(null);
     setMessage(null);
@@ -270,6 +279,14 @@ export default function WorkingHours({ canWrite = false, onChanged }) {
           )}
         </section>
       ) : null}
+      <ConfirmDialog
+        open={confirmOpen}
+        title="Save and publish working hours?"
+        message="This creates a new version of the working hours and publishes it. Results already computed are not affected; only computations made afterwards follow the new schedule. Times are in Asia/Manila."
+        confirmLabel="Save & publish"
+        onConfirm={confirmSave}
+        onCancel={() => setConfirmOpen(false)}
+      />
     </div>
   );
 }

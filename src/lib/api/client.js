@@ -51,3 +51,19 @@ export function toQuery(params) {
   const text = query.toString();
   return text ? `?${text}` : '';
 }
+
+/**
+ * Every item of a paged list (`{ items, total }`), fetched page by page. `extra` are fixed query values (for example
+ * { status: 'all' }). Stops at `maxPages` as a safety limit and returns what it has. Used for name lookups, where a
+ * missing name is shown as unavailable rather than guessed.
+ */
+export async function fetchAllPages(path, fetcher, { extra = {}, pageSize = 100, maxPages = 50 } = {}) {
+  const items = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const data = await fetcher(`${path}${toQuery({ ...extra, page, page_size: pageSize })}`);
+    const batch = data?.items ?? [];
+    items.push(...batch);
+    if (batch.length === 0 || items.length >= (data?.total ?? 0)) break;
+  }
+  return items;
+}

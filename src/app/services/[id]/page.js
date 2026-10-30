@@ -1,5 +1,8 @@
 'use client';
 
+import SubmitButton from '../../../components/ui/SubmitButton.js';
+import { notify } from '../../../lib/ui/notify.js';
+import { saveFailureMessage, savedMessage } from '../../../lib/ui/save-feedback.js';
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
@@ -12,14 +15,17 @@ import RowActionMenu from '../../../components/ui/RowActionMenu.js';
 import StatusBadge from '../../../components/ui/StatusBadge.js';
 import DateHint from '../../../components/forms/DateHint.js';
 import ServiceForm, { formToBody, serviceToForm } from '../../../components/forms/ServiceForm.js';
+import { FieldError, FieldWarning, RequiredMark } from '../../../components/forms/Field.js';
 import { formatDate } from '../../../lib/ui/date-format.js';
-import { CATALOGUE_API, DURATION_UNITS, classificationLabel, standardText } from '../../../lib/api/catalogue.js';
+import { CATALOGUE_API, classificationLabel, scopeLabel, standardText, standardWarning, transactionTypesText } from '../../../lib/api/catalogue.js';
 import { apiFetch } from '../../../lib/auth/session.js';
 import { useFormDirty } from '../../../lib/ui/useFormDirty.js';
+import { useSingleSubmit } from '../../../lib/ui/useSingleSubmit.js';
+import { durationErrors, serviceSaveError, standardToBody } from '../../../lib/ui/service-form.js';
 import { parseDocumentNotes, parseProcedureSteps, splitLinks } from '../../../lib/ui/parseProcedure.js';
 
 const API = CATALOGUE_API;
-const EMPTY_STANDARD = { duration_value: '', duration_unit: 'WORKING_DAYS', effective_from: '', charter_reference: '' };
+const EMPTY_STANDARD = { duration_days: '0', duration_hours: '0', duration_minutes: '0', effective_from: '', charter_reference: '' };
 const EMPTY_DOC = { document_name: '', is_mandatory: true, notes: '' };
 
 const NOT_SET = 'Not set';
@@ -43,28 +49,21 @@ function LinkedText({ text, linkLabel }) {
   );
 }
 
-function FieldError({ errors, name }) {
-  return errors?.[name] ? <p className="mt-1 text-xs text-red-700">{errors[name]}</p> : null;
-}
-
 function ServiceDetail({ user, id }) {
   const isAdmin = user.role === ROLES.SUPER_ADMIN;
   const [state, setState] = useState({ loading: true, service: null, standards: [], documents: [], error: null });
-  const [notice, setNotice] = useState(null);
   const [offices, setOffices] = useState([]);
   const [editForm, setEditForm] = useState(null);
   const [editErrors, setEditErrors] = useState({});
-  const [editError, setEditError] = useState(null);
   const [standard, setStandard] = useState({ ...EMPTY_STANDARD });
   const [standardErrors, setStandardErrors] = useState({});
-  const [standardError, setStandardError] = useState(null);
   const [doc, setDoc] = useState(null); // { document_id?, ...fields }
   const [docErrors, setDocErrors] = useState({});
-  const [docError, setDocError] = useState(null);
   const [confirm, setConfirm] = useState(null); // { kind, item }
   const [saving, setSaving] = useState(false);
   const editDirty = useFormDirty(editForm);
   const docDirty = useFormDirty(doc);
+  const once = useSingleSubmit();
 
   const reload = useCallback(async () => {
     try {
@@ -89,69 +88,96 @@ function ServiceDetail({ user, id }) {
   const { service, standards, documents } = state;
   const current = service?.current_standard ?? null;
 
-  function failWith(err, setErrors, setMessage) {
+  // A failed save: the field errors go under their fields and one notification says it failed; the form stays open as it was.
+  function failWith(err, setErrors) {
     setErrors(err.details && Object.keys(err.details).length > 0 ? err.details : {});
-    setMessage(err.message);
+    notify.error(saveFailureMessage(err, err.message));
   }
 
-  async function saveService(event) {
+  function saveService(event) {
     event.preventDefault();
-    setSaving(true);
-    setEditErrors({});
-    setEditError(null);
-    try {
-      await apiFetch(`${API}/services/${id}`, { method: 'PUT', body: formToBody(editForm, false) });
-      setEditForm(null);
-      setNotice('Service saved.');
-      await reload();
-    } catch (err) {
-      failWith(err, setEditErrors, setEditError);
-    } finally {
-      setSaving(false);
-    }
+    return once(async () => {
+      setSaving(true);
+      setEditErrors({});
+      try {
+        await apiFetch(`${API}/services/${id}`, { method: 'PUT', body: formToBody(editForm, false) });
+        setEditForm(null);
+        notify.success(savedMessage('Service', 'updated')); // only after the server confirmed
+        await reload();
+      } catch (err) {
+        const { details, message } = serviceSaveError(err); // the code is never sent on an edit; 403 and server failures get safe messages
+        setEditErrors(details);
+        notify.error(saveFailureMessage(err, message));
+      } finally {
+        setSaving(false);
+      }
+    });
   }
 
-  async function addStandard(event) {
-    event.preventDefault();
-    setSaving(true);
-    setStandardErrors({});
-    setStandardError(null);
-    try {
-      await apiFetch(`${API}/services/${id}/standards`, {
-        method: 'POST',
-        body: {
-          duration_value: Number(standard.duration_value),
-          duration_unit: standard.duration_unit,
-          effective_from: standard.effective_from,
-          charter_reference: standard.charter_reference,
-        },
-      });
-      setStandard({ ...EMPTY_STANDARD });
-      setNotice('New standard version added.');
-      await reload();
-    } catch (err) {
-      failWith(err, setStandardErrors, setStandardError);
-    } finally {
-      setSaving(false);
-    }
+  // Typing in a standard field takes that field's message away (and the group message for the three duration parts).
+  function changeStandard(patch, ...names) {
+    setStandard({ ...standard, ...patch });
+    setStandardErrors((current) => {
+      const next = { ...current };
+      for (const name of names) delete next[name];
+      return next;
+    });
   }
 
-  async function saveDoc(event) {
+  function addStandard(event) {
     event.preventDefault();
-    setSaving(true);
-    setDocErrors({});
-    setDocError(null);
-    try {
-      const body = { document_name: doc.document_name, is_mandatory: doc.is_mandatory, notes: doc.notes.trim() === '' ? null : doc.notes };
-      if (doc.document_id) await apiFetch(`${API}/services/${id}/documents/${doc.document_id}`, { method: 'PUT', body });
-      else await apiFetch(`${API}/services/${id}/documents`, { method: 'POST', body });
-      setDoc(null);
-      await reload();
-    } catch (err) {
-      failWith(err, setDocErrors, setDocError);
-    } finally {
-      setSaving(false);
+    const problems = {
+      ...durationErrors(standard),
+      ...(standard.effective_from ? {} : { effective_from: 'Enter the date the standard starts.' }),
+      ...(standard.charter_reference.trim() ? {} : { charter_reference: 'Enter the Charter reference.' }),
+    };
+    if (Object.keys(problems).length > 0) {
+      setStandardErrors(problems);
+      notify.error(saveFailureMessage({ status: 400, details: problems }));
+      return undefined;
     }
+    return once(async () => {
+      setSaving(true);
+      setStandardErrors({});
+      try {
+        await apiFetch(`${API}/services/${id}/standards`, { method: 'POST', body: standardToBody(standard) });
+        setStandard({ ...EMPTY_STANDARD });
+        notify.success(savedMessage('Standard version', 'created'));
+        await reload();
+      } catch (err) {
+        // Keep what was typed; the service's errors may be keyed with or without a "standard." prefix.
+        const details = Object.fromEntries(Object.entries(err.details ?? {}).map(([key, message]) => [key.replace(/^standard./, ''), message]));
+        setStandardErrors(details);
+        notify.error(saveFailureMessage(err, err.message));
+      } finally {
+        setSaving(false);
+      }
+    });
+  }
+
+  function saveDoc(event) {
+    event.preventDefault();
+    if (doc.document_name.trim() === '') {
+      setDocErrors({ document_name: 'Enter the document name.' });
+      notify.error(saveFailureMessage({ status: 400, details: { document_name: 'x' } }));
+      return undefined;
+    }
+    return once(async () => {
+      setSaving(true);
+      setDocErrors({});
+      try {
+        const body = { document_name: doc.document_name, is_mandatory: doc.is_mandatory, notes: doc.notes.trim() === '' ? null : doc.notes };
+        if (doc.document_id) await apiFetch(`${API}/services/${id}/documents/${doc.document_id}`, { method: 'PUT', body });
+        else await apiFetch(`${API}/services/${id}/documents`, { method: 'POST', body });
+        setDoc(null);
+        notify.success(savedMessage('Document', doc.document_id ? 'updated' : 'created'));
+        await reload();
+      } catch (err) {
+        failWith(err, setDocErrors);
+      } finally {
+        setSaving(false);
+      }
+    });
   }
 
   async function runConfirm() {
@@ -161,10 +187,13 @@ function ServiceDetail({ user, id }) {
       else if (confirm.kind === 'standard') await apiFetch(`${API}/services/${id}/standards/${confirm.item.standard_id}`, { method: 'DELETE' });
       else await apiFetch(`${API}/services/${id}/${confirm.kind}`, { method: 'PATCH' });
       setConfirm(null);
+      notify.success(
+        confirm.kind === 'document' ? savedMessage('Document', 'deleted') : confirm.kind === 'standard' ? savedMessage('Standard version', 'deleted') : savedMessage('Service', confirm.kind === 'reactivate' ? 'reactivated' : 'deactivated'),
+      );
       await reload();
     } catch (err) {
       setConfirm(null);
-      setState((s) => ({ ...s, error: err.message }));
+      notify.error(saveFailureMessage(err, err.message));
     } finally {
       setSaving(false);
     }
@@ -194,14 +223,6 @@ function ServiceDetail({ user, id }) {
   return (
     <div className="space-y-6">
       <ErrorBanner message={state.error} onDismiss={() => setState((s) => ({ ...s, error: null }))} />
-      {notice ? (
-        <div role="status" className="flex items-start justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-          <span>{notice}</span>
-          <button type="button" className="font-semibold hover:underline" onClick={() => setNotice(null)}>
-            Dismiss
-          </button>
-        </div>
-      ) : null}
 
       <header className="rounded-2xl bg-[#3D0606] px-5 py-4 text-white sm:px-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
@@ -410,7 +431,7 @@ function ServiceDetail({ user, id }) {
               </div>
               <div>
                 <dt className={GLANCE_LABEL}>Who may avail</dt>
-                <dd className={service.who_may_avail ? GLANCE_VALUE : GLANCE_EMPTY}>{service.who_may_avail || NOT_SET}</dd>
+                <dd className={service.who_may_avail ? `${GLANCE_VALUE} whitespace-pre-wrap break-words` : GLANCE_EMPTY}>{service.who_may_avail || NOT_SET}</dd>
               </div>
               <div>
                 <dt className={GLANCE_LABEL}>Classification</dt>
@@ -421,8 +442,12 @@ function ServiceDetail({ user, id }) {
                 <dd className={GLANCE_VALUE}>Timeliness</dd>
               </div>
               <div>
-                <dt className={GLANCE_LABEL}>Transaction type</dt>
-                <dd className={service.transaction_type ? GLANCE_VALUE : GLANCE_EMPTY}>{service.transaction_type || NOT_SET}</dd>
+                <dt className={GLANCE_LABEL}>Scope</dt>
+                <dd className={service.service_scope ? GLANCE_VALUE : GLANCE_EMPTY}>{service.service_scope ? scopeLabel(service.service_scope) : NOT_SET}</dd>
+              </div>
+              <div>
+                <dt className={GLANCE_LABEL}>Transaction types</dt>
+                <dd className={service.transaction_types?.length ? GLANCE_VALUE : GLANCE_EMPTY}>{transactionTypesText(service.transaction_types) || NOT_SET}</dd>
               </div>
             </dl>
           </section>
@@ -456,7 +481,8 @@ function ServiceDetail({ user, id }) {
                           />
                         ) : null}
                       </div>
-                      <p className="mt-2 text-sm font-semibold text-slate-800">{standardText(s.duration_value, s.duration_unit)}</p>
+                      <p className="mt-2 text-sm font-semibold text-slate-800">{standardText(s.duration_days, s.duration_hours, s.duration_minutes)}</p>
+                      <FieldWarning>{standardWarning(service.classification, s.duration_days, s.duration_hours, s.duration_minutes)}</FieldWarning>
                       <p className="mt-1 text-sm text-slate-700">
                         {formatDate(s.effective_from) || '-'} &rarr; {s.effective_to ? formatDate(s.effective_to) || '-' : 'Open'}
                       </p>
@@ -467,49 +493,84 @@ function ServiceDetail({ user, id }) {
               </ul>
             )}
             {isAdmin ? (
-              <form onSubmit={addStandard} className="mt-5 border-t border-slate-200 pt-5">
+              <form onSubmit={addStandard} noValidate className="mt-5 border-t border-slate-200 pt-5">
                 <h3 className="font-sans text-base font-bold text-slate-900">Add New Version</h3>
-                <ErrorBanner message={standardError} />
+                <p className="mt-1 text-xs text-slate-500">
+                  Fields marked <span className="font-bold text-red-700">*</span> are required.
+                </p>
                 <div className="mt-3 grid gap-4">
-                  <div>
-                    <label className="label" htmlFor="std-value">
-                      Duration value
-                    </label>
-                    <input id="std-value" type="number" min={1} step={1} className="input" value={standard.duration_value} onChange={(e) => setStandard({ ...standard, duration_value: e.target.value })} required />
-                    <FieldError errors={standardErrors} name="duration_value" />
-                  </div>
-                  <div>
-                    <label className="label" htmlFor="std-unit">
-                      Duration unit
-                    </label>
-                    <select id="std-unit" className="input" value={standard.duration_unit} onChange={(e) => setStandard({ ...standard, duration_unit: e.target.value })}>
-                      {DURATION_UNITS.map((u) => (
-                        <option key={u.value} value={u.value}>
-                          {u.label}
-                        </option>
+                  <div role="group" aria-labelledby="std-duration-label">
+                    <p id="std-duration-label" className="label">
+                      Processing standard
+                      <RequiredMark />
+                    </p>
+                    <div className="grid grid-cols-3 gap-3">
+                      {[
+                        ['duration_days', 'Working days'],
+                        ['duration_hours', 'Hours'],
+                        ['duration_minutes', 'Minutes'],
+                      ].map(([name, label]) => (
+                        <div key={name}>
+                          <label className="mb-1 block text-xs font-medium text-slate-600" htmlFor={`std-${name}`}>
+                            {label}
+                          </label>
+                          <input
+                            id={`std-${name}`}
+                            type="number"
+                            inputMode="numeric"
+                            min={0}
+                            step={1}
+                            className="input"
+                            value={standard[name]}
+                            onChange={(e) => changeStandard({ [name]: e.target.value }, name, 'duration')}
+                            aria-required="true"
+                            aria-invalid={standardErrors[name] || standardErrors.duration ? true : undefined}
+                            aria-describedby={standardErrors[name] ? `std-${name}-error` : standardErrors.duration ? 'std-duration-error' : undefined}
+                          />
+                          <FieldError id={`std-${name}-error`}>{standardErrors[name]}</FieldError>
+                        </div>
                       ))}
-                    </select>
-                    <FieldError errors={standardErrors} name="duration_unit" />
+                    </div>
+                    <FieldError id="std-duration-error">{standardErrors.duration}</FieldError>
                   </div>
+                  <FieldWarning>{standardWarning(service.classification, standard.duration_days, standard.duration_hours, standard.duration_minutes)}</FieldWarning>
                   <div>
                     <label className="label" htmlFor="std-from">
                       Effective from
+                      <RequiredMark />
                     </label>
-                    <input id="std-from" type="date" className="input" value={standard.effective_from} onChange={(e) => setStandard({ ...standard, effective_from: e.target.value })} required aria-describedby="std-from-hint" />
+                    <input
+                      id="std-from"
+                      type="date"
+                      className="input"
+                      value={standard.effective_from}
+                      onChange={(e) => changeStandard({ effective_from: e.target.value }, 'effective_from')}
+                      aria-required="true"
+                      aria-invalid={standardErrors.effective_from ? true : undefined}
+                      aria-describedby={standardErrors.effective_from ? 'std-from-hint std-from-error' : 'std-from-hint'}
+                    />
                     <DateHint id="std-from-hint" />
-                    <FieldError errors={standardErrors} name="effective_from" />
+                    <FieldError id="std-from-error">{standardErrors.effective_from}</FieldError>
                   </div>
                   <div>
                     <label className="label" htmlFor="std-ref">
                       Charter reference
+                      <RequiredMark />
                     </label>
-                    <input id="std-ref" className="input" value={standard.charter_reference} onChange={(e) => setStandard({ ...standard, charter_reference: e.target.value })} required maxLength={200} />
-                    <FieldError errors={standardErrors} name="charter_reference" />
+                    <input
+                      id="std-ref"
+                      className="input"
+                      value={standard.charter_reference}
+                      onChange={(e) => changeStandard({ charter_reference: e.target.value }, 'charter_reference')}
+                      maxLength={200}
+                      aria-required="true"
+                      aria-invalid={standardErrors.charter_reference ? true : undefined}
+                      aria-describedby={standardErrors.charter_reference ? 'std-ref-error' : undefined}
+                    />
+                    <FieldError id="std-ref-error">{standardErrors.charter_reference}</FieldError>
                   </div>
                 </div>
-                <button type="submit" className="btn-primary mt-4" disabled={saving}>
-                  {saving ? 'Saving…' : 'Add version'}
-                </button>
+                <SubmitButton busy={saving} label="Add version" busyLabel="Creating…" className="btn-primary mt-4" />
               </form>
             ) : null}
           </section>
@@ -527,16 +588,13 @@ function ServiceDetail({ user, id }) {
             <button type="button" className="btn-secondary" onClick={() => setEditForm(null)} disabled={saving}>
               Cancel
             </button>
-            <button type="submit" form="edit-service-form" className="btn-primary" disabled={saving}>
-              {saving ? 'Saving…' : 'Save'}
-            </button>
+            <SubmitButton form="edit-service-form" busy={saving} label="Save" busyLabel="Updating…" />
           </>
         }
       >
         {editForm ? (
           <div className="space-y-4">
-            <ErrorBanner message={editError} />
-            <ServiceForm id="edit-service-form" form={editForm} setForm={setEditForm} errors={editErrors} offices={offices} isNew={false} onSubmit={saveService} />
+            <ServiceForm id="edit-service-form" form={editForm} setForm={setEditForm} errors={editErrors} offices={offices} isNew={false} onSubmit={saveService} currentStandard={current} />
           </div>
         ) : null}
       </Modal>
@@ -551,21 +609,19 @@ function ServiceDetail({ user, id }) {
             <button type="button" className="btn-secondary" onClick={() => setDoc(null)} disabled={saving}>
               Cancel
             </button>
-            <button type="submit" form="doc-form" className="btn-primary" disabled={saving}>
-              {saving ? 'Saving…' : 'Save'}
-            </button>
+            <SubmitButton form="doc-form" busy={saving} label="Save" busyLabel={doc?.document_id ? 'Updating…' : 'Creating…'} />
           </>
         }
       >
         {doc ? (
-          <form id="doc-form" onSubmit={saveDoc} className="space-y-4">
-            <ErrorBanner message={docError} />
+          <form id="doc-form" onSubmit={saveDoc} noValidate className="space-y-4">
             <div>
               <label className="label" htmlFor="doc-name">
                 Document name
+                <RequiredMark />
               </label>
-              <input id="doc-name" className="input" value={doc.document_name} onChange={(e) => setDoc({ ...doc, document_name: e.target.value })} required maxLength={200} autoFocus />
-              <FieldError errors={docErrors} name="document_name" />
+              <input id="doc-name" className="input" value={doc.document_name} onChange={(e) => setDoc({ ...doc, document_name: e.target.value })} maxLength={200} autoFocus aria-required="true" aria-invalid={docErrors.document_name ? true : undefined} aria-describedby={docErrors.document_name ? 'doc-name-error' : undefined} />
+              <FieldError id="doc-name-error">{docErrors.document_name}</FieldError>
             </div>
             <label className="flex items-center gap-2 text-sm text-slate-700">
               <input type="checkbox" checked={doc.is_mandatory} onChange={(e) => setDoc({ ...doc, is_mandatory: e.target.checked })} />
@@ -576,7 +632,7 @@ function ServiceDetail({ user, id }) {
                 Notes (optional, plain text)
               </label>
               <textarea id="doc-notes" className="input" rows={3} value={doc.notes} onChange={(e) => setDoc({ ...doc, notes: e.target.value })} maxLength={1000} />
-              <FieldError errors={docErrors} name="notes" />
+              <FieldError id="doc-notes-error">{docErrors.notes}</FieldError>
             </div>
           </form>
         ) : null}

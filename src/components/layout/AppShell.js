@@ -12,6 +12,7 @@ import { getAccessToken, redirectToLogin, refreshSession, sessionRejection } fro
 import { useSignOut } from '../../lib/auth/useSignOut.js';
 import Breadcrumb from '../navigation/Breadcrumb.js';
 import ConfirmDialog from '../dialogs/ConfirmDialog.js';
+import Toaster from '../feedback/Toaster.js';
 import ErrorBanner from '../feedback/ErrorBanner.js';
 import BrandMark from '../ui/BrandMark.js';
 import NavIcon from './NavIcon.js';
@@ -46,6 +47,10 @@ function getInitialCollapsed() {
   return false;
 }
 
+// The permanent sidebar (collapsible to icons) is for screens from the md size up; below that it is a drawer.
+const WIDE_QUERY = '(min-width: 768px)';
+const readWide = () => (typeof window === 'undefined' ? true : window.matchMedia(WIDE_QUERY).matches);
+
 function persistCollapsed(value) {
   activeSidebarCollapsed = value;
   if (typeof window !== 'undefined') {
@@ -67,6 +72,7 @@ export default function AppShell({ title, subtitle, eyebrow, breadcrumb, headerR
   const [state, setState] = useState(getInitialState);
   const [menuOpen, setMenuOpen] = useState(false);
   const [collapsed, setCollapsedState] = useState(getInitialCollapsed);
+  const [wide, setWide] = useState(readWide);
   const signOutControl = useSignOut();
   const signOutButtonRef = useRef(null);
 
@@ -77,6 +83,24 @@ export default function AppShell({ title, subtitle, eyebrow, breadcrumb, headerR
       return next;
     });
   };
+
+  // Follow the screen size, and let Escape close the drawer.
+  useEffect(() => {
+    const query = window.matchMedia(WIDE_QUERY);
+    const onChange = () => {
+      setWide(query.matches);
+      if (query.matches) setMenuOpen(false);
+    };
+    onChange();
+    query.addEventListener('change', onChange);
+    return () => query.removeEventListener('change', onChange);
+  }, []);
+  useEffect(() => {
+    if (!menuOpen) return undefined;
+    const onKey = (event) => event.key === 'Escape' && setMenuOpen(false);
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [menuOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -93,7 +117,10 @@ export default function AppShell({ title, subtitle, eyebrow, breadcrumb, headerR
                 activeSidebarCollapsed = isCollapsed;
                 setCollapsedState(isCollapsed);
               } else {
-                activeSidebarCollapsed = false;
+                // No saved choice: a tablet starts with icons only, a desktop with the full sidebar.
+                const tablet = window.matchMedia('(max-width: 1023px)').matches;
+                activeSidebarCollapsed = tablet;
+                setCollapsedState(tablet);
               }
             } catch {
               activeSidebarCollapsed = false;
@@ -164,43 +191,37 @@ export default function AppShell({ title, subtitle, eyebrow, breadcrumb, headerR
   const sections = [...new Set(nav.map((item) => item.section))];
   const allowed = isRoleAllowed(user, allowedRoles);
 
+  // Icons only: the permanent sidebar when collapsed. In the drawer the labels always show.
+  const iconOnly = collapsed && wide;
+  const drawerHidden = !wide && !menuOpen;
+  const toggleLabel = wide ? (collapsed ? 'Expand sidebar' : 'Collapse sidebar') : menuOpen ? 'Close navigation' : 'Open navigation';
+
   return (
-    <div className="min-h-screen bg-page lg:flex">
-      {/* Geometry follows the reference screenshot (253px wide crop, 1x): 256px sidebar, 61px header,
-          38px items on a 40px pitch, 12px free space on the right, active bar flush with the left edge. */}
+    <div className="min-h-screen bg-white md:flex">
+      {!wide && menuOpen ? <div className="fixed inset-0 z-30 bg-slate-900/40" onClick={() => setMenuOpen(false)} aria-hidden="true" /> : null}
+      {/* Sidebar: a drawer on phones, a permanent sidebar from md up that the hamburger button in the header collapses to icons. */}
       <aside
         id="app-sidebar"
-        className={`${menuOpen ? 'block' : 'hidden'} font-sans relative w-full shrink-0 bg-[#3D0606] text-white transition-all duration-200 lg:sticky lg:top-0 lg:block lg:h-screen lg:self-start ${
-          collapsed ? 'lg:w-[72px]' : 'lg:w-[220px]'
-        }`}
+        aria-label="Sidebar"
+        className={`font-sans fixed inset-y-0 left-0 z-40 w-64 shrink-0 bg-[#3D0606] text-white transition-[transform,width] duration-200 md:sticky md:top-0 md:z-auto md:h-screen md:translate-x-0 md:self-start ${
+          menuOpen ? 'translate-x-0' : '-translate-x-full'
+        } ${drawerHidden ? 'invisible md:visible' : ''} ${iconOnly ? 'md:w-[72px]' : 'md:w-64'}`}
       >
-        {/* Floating circular toggle button straddling the right edge */}
-        <button
-          type="button"
-          onClick={toggleCollapsed}
-          className="hidden lg:flex absolute -right-4 top-5 z-30 h-8 w-8 items-center justify-center rounded-full bg-white text-[#3D0606] shadow-md border border-slate-200/80 hover:bg-slate-50 hover:scale-105 active:scale-95 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-[#E5B53A]"
-          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5" aria-hidden="true">
-            {collapsed ? <polyline points="9 18 15 12 9 6" /> : <polyline points="15 18 9 12 15 6" />}
-          </svg>
-        </button>
-
         {/* Inner vertical scrolling container */}
         <div className="flex h-full flex-col overflow-y-auto">
           {/* Branding Header */}
           <div
-            className={`flex h-[72px] shrink-0 border-b border-white/10 bg-[#3D0606] transition-all duration-200 ${
-              collapsed
+            className={`flex h-16 shrink-0 border-b border-white/10 bg-[#3D0606] transition-all duration-200 ${
+              iconOnly
                 ? 'items-center justify-center px-2'
                 : 'items-center px-4'
             }`}
           >
-            <div className={`flex items-center min-w-0 ${collapsed ? 'justify-center' : 'gap-3'}`}>
+            <div className={`flex items-center min-w-0 ${iconOnly ? 'justify-center' : 'gap-3'}`}>
               <div className="shrink-0 flex items-center justify-center">
-                <BrandMark size={collapsed ? 34 : 36} />
+                <BrandMark size={iconOnly ? 34 : 36} />
               </div>
-              {!collapsed && (
+              {!iconOnly && (
                 <div className="min-w-0">
                   <p className="truncate text-xs font-bold leading-tight tracking-tight text-white">{BRAND.campus}</p>
                   <p className="truncate text-[10px] font-semibold leading-tight text-[#E5B53A] mt-0.5">{BRAND.system}</p>
@@ -210,17 +231,17 @@ export default function AppShell({ title, subtitle, eyebrow, breadcrumb, headerR
           </div>
 
           {/* Navigation Sections */}
-          <nav className={`space-y-5 py-4 ${collapsed ? 'px-1.5' : 'px-2.5'}`} aria-label="Main navigation">
+          <nav className={`space-y-6 py-5 ${iconOnly ? 'px-1.5' : 'px-2.5'}`} aria-label="Main navigation">
             {sections.map((section) => (
               <div key={section}>
-                {collapsed ? (
-                  <div className="my-2 border-t border-white/10 mx-2" aria-hidden="true" />
+                {iconOnly ? (
+                  <div className="mb-2 border-t border-white/10 mx-2" aria-hidden="true" />
                 ) : (
-                  <p className="mb-2 px-2 text-[10px] font-bold uppercase tracking-wider text-[#E5B53A]">
+                  <p className="mb-4 px-3.5 text-[10px] font-bold uppercase leading-4 tracking-[0.12em] text-[#E5B53A]">
                     {section}
                   </p>
                 )}
-                <ul className="space-y-1">
+                <ul className="space-y-0.5">
                   {nav
                     .filter((item) => item.section === section)
                     .map((item) => {
@@ -231,14 +252,15 @@ export default function AppShell({ title, subtitle, eyebrow, breadcrumb, headerR
                             href={item.href}
                             aria-current={active ? 'page' : undefined}
                             title={item.label}
-                            className={`group relative flex h-10 items-center rounded-lg text-xs font-medium transition-all duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-[#E5B53A] ${
+                            onClick={() => setMenuOpen(false)}
+                            className={`group relative flex h-[38px] items-center rounded-lg text-sm font-medium transition-all duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-[#E5B53A] ${
                               active
                                 ? 'bg-[#783535] text-white shadow-sm font-semibold'
                                 : 'text-white/80 hover:bg-white/10 hover:text-white'
                             } ${
-                              collapsed
-                                ? 'w-10 mx-auto justify-center px-0'
-                                : 'w-full px-2.5'
+                              iconOnly
+                                ? 'mx-auto w-10 justify-center px-0'
+                                : 'w-full px-3.5'
                             }`}
                           >
                             {active && (
@@ -247,13 +269,13 @@ export default function AppShell({ title, subtitle, eyebrow, breadcrumb, headerR
                                 aria-hidden="true"
                               />
                             )}
-                            {collapsed ? (
+                            {iconOnly ? (
                               <>
                                 <NavIcon href={item.href} />
                                 <span className="sr-only">{item.label}</span>
                               </>
                             ) : (
-                              <span className={`flex items-center gap-2.5 ${active ? 'pl-1.5' : ''}`}>
+                              <span className="flex min-w-0 items-center gap-4">
                                 <NavIcon href={item.href} />
                                 <span className="truncate">{item.label}</span>
                               </span>
@@ -270,12 +292,21 @@ export default function AppShell({ title, subtitle, eyebrow, breadcrumb, headerR
       </aside>
 
       <div className={`min-w-0 flex-1 ${pageClassName ?? ''}`.trim()}>
-        <header className="flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 sm:px-8">
-          <div className="flex items-center gap-3">
-            <button type="button" className="btn-secondary px-3 py-1.5 lg:hidden" onClick={() => setMenuOpen((open) => !open)} aria-label="Toggle navigation" aria-expanded={menuOpen} aria-controls="app-sidebar">
-              Menu
+        <header className="flex h-16 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 sm:px-8">
+          <div className="flex min-w-0 items-center gap-3">
+            <button
+              type="button"
+              onClick={wide ? toggleCollapsed : () => setMenuOpen((open) => !open)}
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-maroon-700"
+              aria-label={toggleLabel}
+              aria-expanded={wide ? !collapsed : menuOpen}
+              aria-controls="app-sidebar"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="h-5 w-5" aria-hidden="true">
+                <path d="M4 7h16M4 12h16M4 17h16" />
+              </svg>
             </button>
-            {breadcrumb ? <Breadcrumb items={breadcrumb} className="text-base text-slate-800" /> : <span className="text-base font-bold text-slate-800">{title}</span>}
+            {breadcrumb ? <Breadcrumb items={breadcrumb} className="min-w-0 text-base text-slate-800" /> : <span className="truncate text-base font-bold text-slate-800">{title}</span>}
           </div>
           <RowActionMenu
             label={`Account menu for ${user.fullName}`}
@@ -324,6 +355,7 @@ export default function AppShell({ title, subtitle, eyebrow, breadcrumb, headerR
         </main>
       </div>
       <ConfirmDialog {...signOutControl.dialogProps} returnFocusRef={signOutButtonRef} />
+      <Toaster />
     </div>
   );
 }

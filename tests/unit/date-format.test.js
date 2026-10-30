@@ -141,8 +141,7 @@ describe('formatting stays at the display boundary', () => {
     has('src/app/calendar/Holidays.js', 'suspended_from: form.suspended_from.trim() || null,');
     has('src/app/calendar/Terms.js', 'start_date: form.start_date, end_date: form.end_date');
     has('src/app/calendar/WorkingHours.js', 'opening_time: r.opening_time.trim(), closing_time: r.closing_time.trim()');
-    has('src/app/services/[id]/page.js', 'effective_from: standard.effective_from,');
-    has('src/components/forms/ServiceForm.js', 'effective_from: form.effective_from,');
+    has('src/lib/ui/service-form.js', 'effective_from: values.effective_from,');
     // Edit forms start from the API values, untouched.
     has('src/app/calendar/Terms.js', 'start_date: term.start_date, end_date: term.end_date');
     // No formatter is called anywhere a request body is made.

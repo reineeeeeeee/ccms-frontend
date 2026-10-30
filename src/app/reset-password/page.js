@@ -1,5 +1,6 @@
 'use client';
 
+import { RequiredMark } from '../../components/forms/Field.js';
 import { Suspense, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
@@ -61,12 +62,12 @@ function ResetForm() {
   return (
     <form onSubmit={onSubmit} className="space-y-5" noValidate>
       <div>
-        <label className="label" htmlFor="password">New password</label>
+        <label className="label" htmlFor="password">New password<RequiredMark /></label>
         <input id="password" type="password" autoComplete="new-password" className="input" value={password} onChange={(e) => setPassword(e.target.value)} required autoFocus />
         <p className="mt-1 text-xs text-slate-500">At least {MIN_LENGTH} characters.</p>
       </div>
       <div>
-        <label className="label" htmlFor="confirm">Confirm new password</label>
+        <label className="label" htmlFor="confirm">Confirm new password<RequiredMark /></label>
         <input id="confirm" type="password" autoComplete="new-password" className="input" value={confirm} onChange={(e) => setConfirm(e.target.value)} required />
       </div>
       <button type="submit" className="btn-primary w-full" disabled={busy}>{busy ? 'Saving…' : 'Set new password'}</button>

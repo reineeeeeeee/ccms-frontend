@@ -1,5 +1,11 @@
 'use client';
 
+import SubmitButton from '../../components/ui/SubmitButton.js';
+import { notify } from '../../lib/ui/notify.js';
+import { saveFailureMessage, savedMessage } from '../../lib/ui/save-feedback.js';
+import SearchInput from '../../components/forms/SearchInput.js';
+import ClearFiltersButton from '../../components/forms/ClearFiltersButton.js';
+import { RequiredMark } from '../../components/forms/Field.js';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ROLES } from 'ccms-shared/roles';
 import AppShell from '../../components/layout/AppShell.js';
@@ -11,21 +17,23 @@ import Modal from '../../components/modals/Modal.js';
 import RowActionMenu from '../../components/ui/RowActionMenu.js';
 import StatusBadge from '../../components/ui/StatusBadge.js';
 import TableState from '../../components/ui/TableState.js';
-import { OFFICES_API } from '../../lib/api/catalogue.js';
+import InstitutionCodePanel from '../../components/offices/InstitutionCodePanel.js';
+import { CATALOGUE_SETTINGS_API, OFFICES_API } from '../../lib/api/catalogue.js';
 import { apiFetch } from '../../lib/auth/session.js';
-import { OFFICE_CODE_PREFIX, composeOfficeCode, officeCodeProblem, officePart, officeSaveError } from '../../lib/ui/office-code.js';
+import { INSTITUTION_UNAVAILABLE_MESSAGE, officeCodeProblem, officePart, officeRequestBody, officeSaveError } from '../../lib/ui/office-code.js';
 import { useFormDirty } from '../../lib/ui/useFormDirty.js';
 
-// office_code is the whole code, or only the office part while an institution prefix is shown (OFFICE_CODE_PREFIX).
-// legacy: an existing code that does not start with the prefix; it is shown and saved whole.
-const EMPTY_FORM = { office_code: '', office_name: '', legacy: false };
+// office_code in this form is the OFFICE PART ("OSAS"); Core builds the full code "PUP-OSAS" from the institution code and sends it back.
+// currentCode: an existing office whose saved code does not start with the institution code yet (shown as a note).
+const EMPTY_FORM = { office_code: '', office_name: '', currentCode: null };
 
 function OfficesManager() {
   const [state, setState] = useState({ loading: true, items: [], error: null });
   const [search, setSearch] = useState('');
-  const [form, setForm] = useState(null); // { id?, office_code, office_name, legacy }
+  const [status, setStatus] = useState(''); // '' = all, 'active', 'inactive'
+  const [settings, setSettings] = useState({ loading: true, code: null, error: null }); // the institution code, from Core
+  const [form, setForm] = useState(null); // { id?, office_code (the office part), office_name, currentCode }
   const [fieldErrors, setFieldErrors] = useState({});
-  const [formError, setFormError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [confirm, setConfirm] = useState(null); // office being deactivated
   const formDirty = useFormDirty(form);
@@ -43,48 +51,68 @@ function OfficesManager() {
     reload();
   }, [reload]);
 
+  // The institution code comes from Core. Nothing is assumed: while it is unknown or unavailable, offices cannot be added or edited.
+  const loadSettings = useCallback(async () => {
+    setSettings((current) => ({ ...current, loading: true, error: null }));
+    try {
+      const data = await apiFetch(CATALOGUE_SETTINGS_API);
+      setSettings({ loading: false, code: data?.settings?.institution_code ?? null, error: null });
+    } catch (err) {
+      setSettings({ loading: false, code: null, error: err.status === 403 ? err.message : INSTITUTION_UNAVAILABLE_MESSAGE });
+    }
+  }, []);
+
+  useEffect(() => {
+    loadSettings();
+  }, [loadSettings]);
+
+  const prefix = settings.code; // null until Core has one
+
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase();
-    if (!term) return state.items;
-    return state.items.filter((o) => o.office_code.toLowerCase().includes(term) || o.office_name.toLowerCase().includes(term));
-  }, [state.items, search]);
+    return state.items.filter(
+      (o) =>
+        (status === '' || (status === 'active') === o.is_active) &&
+        (!term || o.office_code.toLowerCase().includes(term) || o.office_name.toLowerCase().includes(term)),
+    );
+  }, [state.items, search, status]);
 
   function openForm(office) {
     setFieldErrors({});
-    setFormError(null);
+    if (!prefix) return; // Core cannot build a code without the institution code
     if (!office) {
       setForm({ ...EMPTY_FORM });
       return;
     }
-    // With a prefix, edit only the office part of a prefixed code, so saving never writes the prefix twice.
-    const part = OFFICE_CODE_PREFIX ? officePart(OFFICE_CODE_PREFIX, office.office_code) : null;
-    setForm({ id: office.office_id, office_code: part ?? office.office_code, office_name: office.office_name, legacy: Boolean(OFFICE_CODE_PREFIX) && part === null });
+    // Edit only the office part of "PUP-OSAS", so saving never writes the institution code twice.
+    const part = officePart(prefix, office.office_code);
+    setForm({ id: office.office_id, office_code: part ?? '', office_name: office.office_name, currentCode: part === null ? office.office_code : null });
   }
 
   async function save(event) {
     event.preventDefault();
-    const prefix = form.legacy ? null : OFFICE_CODE_PREFIX;
+    if (saving) return; // one request at a time
     const problem = officeCodeProblem(prefix, form.office_code);
     if (problem) {
       setFieldErrors({ office_code: problem });
-      setFormError(null);
+      notify.error(saveFailureMessage({ status: 400, details: { office_code: problem } }));
       return;
     }
     setSaving(true);
     setFieldErrors({});
-    setFormError(null);
     try {
-      const body = { office_code: composeOfficeCode(prefix, form.office_code), office_name: form.office_name };
+      const body = officeRequestBody(form.office_code, form.office_name); // { office_abbr, office_name }: Core builds the full code
       if (form.id) await apiFetch(`${OFFICES_API}/${form.id}`, { method: 'PUT', body });
       else await apiFetch(OFFICES_API, { method: 'POST', body });
       setForm(null);
+      notify.success(savedMessage('Office', form.id ? 'updated' : 'created')); // only after the server confirmed
       await reload();
     } catch (err) {
-      // The service answers 409 for a code or name already in use and 400 with the field that is wrong;
-      // officeSaveError turns those, 403 and network or server failures into plain messages.
+      // The service answers 409 for a code or name already in use, 400 with the field that is wrong, 409 when the institution code is
+      // missing or the code cannot change; officeSaveError turns those, 403 and network or server failures into plain messages.
       const { fieldErrors: fields, message } = officeSaveError(err, prefix);
       setFieldErrors(fields);
-      setFormError(message);
+      notify.error(saveFailureMessage(err, message)); // the form stays open with what was typed
     } finally {
       setSaving(false);
     }
@@ -95,10 +123,11 @@ function OfficesManager() {
     try {
       await apiFetch(`${OFFICES_API}/${office.office_id}/${active ? 'reactivate' : 'deactivate'}`, { method: 'PATCH' });
       setConfirm(null);
+      notify.success(savedMessage('Office', active ? 'reactivated' : 'deactivated'));
       await reload();
     } catch (err) {
       setConfirm(null);
-      setState((current) => ({ ...current, error: err.message }));
+      notify.error(saveFailureMessage(err, err.message));
     } finally {
       setSaving(false);
     }
@@ -108,15 +137,37 @@ function OfficesManager() {
     <div className="space-y-4">
       <ErrorBanner message={state.error} onDismiss={() => setState((s) => ({ ...s, error: null }))} />
 
-      <div className="card p-4">
-        <div className="flex flex-wrap items-end justify-between gap-3">
+      <InstitutionCodePanel
+        settings={settings}
+        onRetry={loadSettings}
+        onSaved={(code) => setSettings({ loading: false, code, error: null })}
+      />
+
+      <div className="card p-5 sm:p-6">
+        <div className="flex flex-wrap items-end gap-x-5 gap-y-4">
           <div className="w-full sm:w-72">
             <label className="label" htmlFor="office-search">
               Search office
             </label>
-            <input id="office-search" className="input" placeholder="Office name" value={search} onChange={(e) => setSearch(e.target.value)} />
+            <SearchInput id="office-search" value={search} onChange={(e) => setSearch(e.target.value)} />
           </div>
-          <button type="button" className="btn-primary" onClick={() => openForm(null)}>
+          <div className="w-full sm:w-40">
+            <label className="label" htmlFor="office-status">
+              Status
+            </label>
+            <select id="office-status" className="input select-chevron" value={status} onChange={(e) => setStatus(e.target.value)}>
+              <option value="">All</option>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </div>
+          {search.trim() || status ? (
+            <ClearFiltersButton className="w-full sm:w-auto" onClick={() => {
+                setSearch('');
+                setStatus('');
+              }} />
+          ) : null}
+          <button type="button" className="btn-primary w-full sm:ml-auto sm:w-auto" onClick={() => openForm(null)} disabled={!prefix} title={prefix ? undefined : 'Set the institution code first'}>
             + Add Office
           </button>
         </div>
@@ -128,21 +179,23 @@ function OfficesManager() {
           head={
             <tr>
               <Th>Office name</Th>
+              <Th>Office code</Th>
               <Th>Status</Th>
               <Th align="right">Actions</Th>
             </tr>
           }
         >
               {state.loading ? (
-                <TableState colSpan={3} kind="loading">Loading offices…</TableState>
+                <TableState colSpan={4} kind="loading">Loading offices…</TableState>
               ) : visible.length === 0 ? (
-                <TableState colSpan={3}>
-                  {state.items.length === 0 ? 'No offices yet. Add the first office from the Citizen’s Charter.' : 'No offices match your search.'}
+                <TableState colSpan={4}>
+                  {state.items.length === 0 ? 'No offices yet. Add the first office from the Citizen’s Charter.' : 'No offices match your search or filter.'}
                 </TableState>
               ) : (
                 visible.map((office) => (
                   <tr key={office.office_id} className={`tr-row ${office.is_active ? '' : 'bg-table-hover'}`}>
                     <td className="td">{office.office_name}</td>
+                    <td className="td whitespace-nowrap font-mono font-semibold text-slate-700" data-testid="office-code">{office.office_code}</td>
                     <td className="td">
                       <StatusBadge variant={office.is_active ? 'active' : 'inactive'}>{office.is_active ? 'Active' : 'Inactive'}</StatusBadge>
                     </td>
@@ -151,7 +204,7 @@ function OfficesManager() {
                         <RowActionMenu
                           label={`Actions for ${office.office_name}`}
                           items={[
-                            { label: 'Edit', onSelect: () => openForm(office) },
+                            { label: 'Edit', disabled: !prefix, onSelect: () => openForm(office) },
                             office.is_active
                               ? { label: 'Deactivate', danger: true, onSelect: () => setConfirm(office) }
                               : { label: 'Reactivate', disabled: saving, onSelect: () => setActive(office, true) },
@@ -175,18 +228,15 @@ function OfficesManager() {
             <button type="button" className="btn-secondary" onClick={() => setForm(null)} disabled={saving}>
               Cancel
             </button>
-            <button type="submit" form="office-form" className="btn-primary" disabled={saving}>
-              {saving ? 'Saving…' : 'Save'}
-            </button>
+            <SubmitButton form="office-form" busy={saving} label="Save" busyLabel={form?.id ? 'Updating…' : 'Creating…'} />
           </>
         }
       >
         {form ? (
           <form id="office-form" onSubmit={save} className="space-y-4">
-            <ErrorBanner message={formError} />
             <OfficeCodeField
-              prefix={OFFICE_CODE_PREFIX}
-              legacy={form.legacy}
+              prefix={prefix}
+              currentCode={form.currentCode}
               value={form.office_code}
               onChange={(value) => setForm({ ...form, office_code: value })}
               error={fieldErrors.office_code}
@@ -194,9 +244,8 @@ function OfficesManager() {
             />
             <div>
               <label className="label" htmlFor="office_name">
-                Office name (as printed in the Charter)
-              </label>
-              <input id="office_name" className="input" value={form.office_name} onChange={(e) => setForm({ ...form, office_name: e.target.value })} required maxLength={200} />
+                Office name (as printed in the Charter)<RequiredMark /></label>
+              <input id="office_name" className="input" value={form.office_name} onChange={(e) => setForm({ ...form, office_name: e.target.value })} required maxLength={200} aria-invalid={fieldErrors.office_name ? true : undefined} />
               {fieldErrors.office_name ? <p className="mt-1 text-xs text-red-700">{fieldErrors.office_name}</p> : null}
             </div>
           </form>

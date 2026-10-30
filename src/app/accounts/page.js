@@ -1,5 +1,11 @@
 'use client';
 
+import SubmitButton from '../../components/ui/SubmitButton.js';
+import { notify } from '../../lib/ui/notify.js';
+import { saveFailureMessage, savedMessage } from '../../lib/ui/save-feedback.js';
+import SearchInput from '../../components/forms/SearchInput.js';
+import ClearFiltersButton from '../../components/forms/ClearFiltersButton.js';
+import { RequiredMark } from '../../components/forms/Field.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ROLES, ROLE_LABELS, ROLE_LIST, isOfficeBound } from 'ccms-shared/roles';
 import AppShell from '../../components/layout/AppShell.js';
@@ -8,6 +14,7 @@ import ErrorBanner from '../../components/feedback/ErrorBanner.js';
 import Modal from '../../components/modals/Modal.js';
 import RowActionMenu from '../../components/ui/RowActionMenu.js';
 import StatusBadge from '../../components/ui/StatusBadge.js';
+import RoleBadge from '../../components/ui/RoleBadge.js';
 import TableState from '../../components/ui/TableState.js';
 import Pager from '../../components/navigation/Pager.js';
 import TableShell, { Table, Th } from '../../components/ui/TableShell.js';
@@ -26,10 +33,8 @@ function AccountsManager() {
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [list, setList] = useState({ loading: true, items: [], total: 0, error: null });
   const [offices, setOffices] = useState([]);
-  const [notice, setNotice] = useState(null);
   const [form, setForm] = useState(null);
   const [fieldErrors, setFieldErrors] = useState({});
-  const [formError, setFormError] = useState(null);
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState(null); // { type: 'deactivate' | 'reset', account }
   const formDirty = useFormDirty(form);
@@ -104,7 +109,7 @@ function AccountsManager() {
   const officeLabel = (id) => {
     if (!id) return '—';
     const office = officeById.get(id);
-    return office ? `${office.office_code}${office.is_active ? '' : ' (inactive)'}` : 'Unknown office';
+    return office ? `${office.office_name}${office.is_active ? '' : ' (inactive)'}` : 'Unknown office';
   };
   // Inactive offices cannot be assigned, except the one an account already has (so the edit form can show it).
   const officeOptions = (currentId) => offices.filter((o) => o.is_active || o.office_id === currentId);
@@ -123,7 +128,6 @@ function AccountsManager() {
   function openForm(account) {
     rememberTrigger();
     setFieldErrors({});
-    setFormError(null);
     setForm(
       account
         ? { id: account.account_id, employee_no: account.employee_no, full_name: account.full_name, email: account.email, role: account.role, office_id: account.office_id ?? '', password: '' }
@@ -137,9 +141,9 @@ function AccountsManager() {
 
   async function save(event) {
     event.preventDefault();
+    if (busy) return; // one request at a time
     setBusy(true);
     setFieldErrors({});
-    setFormError(null);
     try {
       const body = {
         employee_no: form.employee_no,
@@ -150,13 +154,13 @@ function AccountsManager() {
       };
       if (form.id) await apiFetch(`${ACCOUNTS_API}/${form.id}`, { method: 'PUT', body });
       else await apiFetch(ACCOUNTS_API, { method: 'POST', body: { ...body, password: form.password } });
-      setNotice(form.id ? 'Account updated.' : 'Account created.');
       setForm(null);
+      notify.success(savedMessage('Account', form.id ? 'updated' : 'created')); // only after the server confirmed
       await load();
     } catch (err) {
       setFieldErrors(err.details && typeof err.details === 'object' ? err.details : {});
-      // Field problems show under their fields; anything else (503, 409 on last admin...) shows as a banner.
-      setFormError(err.code === 'VALIDATION_ERROR' || err.code === 'EMAIL_TAKEN' || err.code === 'EMPLOYEE_NO_TAKEN' ? null : err.message);
+      // The modal stays open with what was typed; field problems show under their fields, and one notification says it failed.
+      notify.error(saveFailureMessage(err, err.message));
     } finally {
       setBusy(false);
     }
@@ -168,16 +172,16 @@ function AccountsManager() {
     try {
       if (type === 'deactivate') {
         await apiFetch(`${ACCOUNTS_API}/${account.account_id}/deactivate`, { method: 'PATCH' });
-        setNotice(`${account.full_name} was deactivated and signed out.`);
+        notify.success(`${account.full_name} was deactivated and signed out.`);
       } else {
         const result = await apiFetch(`${ACCOUNTS_API}/${account.account_id}/reset-password`, { method: 'POST' });
-        setNotice(result.message);
+        notify.success(result?.message || 'Password reset link sent.');
       }
       setConfirm(null);
       await load();
     } catch (err) {
       setConfirm(null);
-      setList((current) => ({ ...current, error: err.message }));
+      notify.error(saveFailureMessage(err, err.message));
     } finally {
       setBusy(false);
     }
@@ -193,10 +197,10 @@ function AccountsManager() {
     setBusy(true);
     try {
       await apiFetch(`${ACCOUNTS_API}/${account.account_id}/reactivate`, { method: 'PATCH' });
-      setNotice(`${account.full_name} was reactivated.`);
+      notify.success(`${account.full_name} was reactivated.`);
       await load();
     } catch (err) {
-      setList((current) => ({ ...current, error: err.message }));
+      notify.error(saveFailureMessage(err, err.message));
     } finally {
       setBusy(false);
     }
@@ -205,49 +209,51 @@ function AccountsManager() {
   return (
     <div className="space-y-4">
       <ErrorBanner message={list.error} onDismiss={() => setList((current) => ({ ...current, error: null }))} />
-      {notice ? (
-        <div role="status" className="flex items-start justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-          <span>{notice}</span>
-          <button type="button" className="font-semibold hover:underline" onClick={() => setNotice(null)}>
-            Dismiss
-          </button>
-        </div>
-      ) : null}
 
-      <div className="card p-4">
-        <div className="flex flex-wrap items-end gap-3">
+      <div className="card p-5 sm:p-6">
+        <div className="flex flex-wrap items-end gap-x-5 gap-y-4">
           <div className="w-full sm:w-64">
             <label className="label" htmlFor="account-search">Search name</label>
-            <input id="account-search" className="input" placeholder="Name, email or employee no." value={filters.q} onChange={(e) => setFilter('q', e.target.value)} />
+            <SearchInput id="account-search" value={filters.q} onChange={(e) => setFilter('q', e.target.value)} />
           </div>
           <div className="w-full sm:w-44">
             <label className="label" htmlFor="filter-role">Role</label>
-            <select id="filter-role" className="input" value={filters.role} onChange={(e) => setFilter('role', e.target.value)}>
+            <select id="filter-role" className="input select-chevron" value={filters.role} onChange={(e) => setFilter('role', e.target.value)}>
               <option value="">All roles</option>
               {ROLE_LIST.map((role) => (
                 <option key={role} value={role}>{ROLE_LABELS[role]}</option>
               ))}
             </select>
           </div>
-          <div className="w-full sm:w-44">
+          <div className="w-full sm:w-56">
             <label className="label" htmlFor="filter-office">Office</label>
-            <select id="filter-office" className="input" value={filters.office_id} onChange={(e) => setFilter('office_id', e.target.value)}>
+            <select id="filter-office" className="input select-chevron" value={filters.office_id} onChange={(e) => setFilter('office_id', e.target.value)}>
               <option value="">All offices</option>
               {offices.map((o) => (
-                <option key={o.office_id} value={o.office_id}>{o.office_code}{o.is_active ? '' : ' (inactive)'}</option>
+                <option key={o.office_id} value={o.office_id}>{o.office_name}{o.is_active ? '' : ' (inactive)'}</option>
               ))}
             </select>
           </div>
           <div className="w-full sm:w-36">
             <label className="label" htmlFor="filter-status">Status</label>
-            <select id="filter-status" className="input" value={filters.status} onChange={(e) => setFilter('status', e.target.value)}>
+            <select id="filter-status" className="input select-chevron" value={filters.status} onChange={(e) => setFilter('status', e.target.value)}>
               <option value="">All</option>
               <option value="active">Active</option>
               <option value="inactive">Inactive</option>
             </select>
           </div>
-          <div className="ml-auto">
-            <button ref={addButtonRef} type="button" className="btn-primary" onClick={() => openForm(null)}>+ Add Account</button>
+          {filters.q.trim() || filters.role || filters.office_id || filters.status ? (
+            <ClearFiltersButton
+              className="w-full sm:w-auto"
+              onClick={() => {
+                setFilters({ q: '', role: '', office_id: '', status: '' });
+                setAppliedQuery('');
+                setPage(1);
+              }}
+            />
+          ) : null}
+          <div className="w-full sm:ml-auto sm:w-auto">
+            <button ref={addButtonRef} type="button" className="btn-primary w-full sm:w-auto" onClick={() => openForm(null)}>+ Add Account</button>
           </div>
         </div>
       </div>
@@ -279,7 +285,7 @@ function AccountsManager() {
                       <p className="text-xs text-slate-500">{account.employee_no}</p>
                     </td>
                     <td className="td">{account.email}</td>
-                    <td className="td"><StatusBadge variant="role">{ROLE_LABELS[account.role]}</StatusBadge></td>
+                    <td className="td"><RoleBadge role={account.role} /></td>
                     <td className="td">{officeLabel(account.office_id)}</td>
                     <td className="td">
                       <StatusBadge variant={account.is_active ? 'active' : 'inactive'}>{account.is_active ? 'Active' : 'Inactive'}</StatusBadge>
@@ -316,27 +322,26 @@ function AccountsManager() {
         footer={
           <>
             <button type="button" className="btn-secondary" onClick={() => setForm(null)} disabled={busy}>Cancel</button>
-            <button type="submit" form="account-form" className="btn-primary" disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
+            <SubmitButton form="account-form" busy={busy} label="Save" busyLabel={form?.id ? 'Updating…' : 'Creating…'} />
           </>
         }
       >
         {form ? (
           <form id="account-form" onSubmit={save} className="space-y-4" noValidate>
-            <ErrorBanner message={formError} />
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
-                <label className="label" htmlFor="employee_no">Employee no.</label>
+                <label className="label" htmlFor="employee_no">Employee no.<RequiredMark /></label>
                 <input id="employee_no" className="input" value={form.employee_no} onChange={(e) => setForm({ ...form, employee_no: e.target.value })} required autoFocus />
                 {fieldErrors.employee_no ? <p className="mt-1 text-xs text-red-700">{fieldErrors.employee_no}</p> : null}
               </div>
               <div>
-                <label className="label" htmlFor="full_name">Full name</label>
+                <label className="label" htmlFor="full_name">Full name<RequiredMark /></label>
                 <input id="full_name" className="input" value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} required />
                 {fieldErrors.full_name ? <p className="mt-1 text-xs text-red-700">{fieldErrors.full_name}</p> : null}
               </div>
             </div>
             <div>
-              <label className="label" htmlFor="email">Email</label>
+              <label className="label" htmlFor="email">Email<RequiredMark /></label>
               <input id="email" type="email" className="input" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required />
               {fieldErrors.email ? <p className="mt-1 text-xs text-red-700">{fieldErrors.email}</p> : null}
             </div>
@@ -352,11 +357,11 @@ function AccountsManager() {
               </div>
               {isOfficeBound(form.role) ? (
                 <div>
-                  <label className="label" htmlFor="office_id">Office</label>
+                  <label className="label" htmlFor="office_id">Office<RequiredMark /></label>
                   <select id="office_id" className="input" value={form.office_id} onChange={(e) => setForm({ ...form, office_id: e.target.value })}>
                     <option value="">Select an office</option>
                     {officeOptions(form.office_id).map((o) => (
-                      <option key={o.office_id} value={o.office_id}>{o.office_code} — {o.office_name}{o.is_active ? '' : ' (inactive)'}</option>
+                      <option key={o.office_id} value={o.office_id}>{o.office_name}{o.is_active ? '' : ' (inactive)'}</option>
                     ))}
                   </select>
                   {fieldErrors.office_id ? <p className="mt-1 text-xs text-red-700">{fieldErrors.office_id}</p> : null}
@@ -365,7 +370,7 @@ function AccountsManager() {
             </div>
             {!form.id ? (
               <div>
-                <label className="label" htmlFor="password">Initial password</label>
+                <label className="label" htmlFor="password">Initial password<RequiredMark /></label>
                 <input id="password" type="password" autoComplete="new-password" className="input" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required />
                 <p className="mt-1 text-xs text-slate-500">At least 8 characters. The person can change it through a reset link.</p>
                 {fieldErrors.password ? <p className="mt-1 text-xs text-red-700">{fieldErrors.password}</p> : null}

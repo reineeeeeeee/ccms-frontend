@@ -81,7 +81,7 @@ describe('errors', () => {
   it('maps the real resume answers; Core down keeps it on hold and offers a retry', () => {
     const down = holdActionError(apiError(503, 'CALENDAR_UNAVAILABLE', 'raw server text'), 'resume');
     assert.deepEqual([down.kind, down.message, down.reload], ['calendar_unavailable', HOLD_MESSAGES.calendarDown, false]);
-    assert.match(down.message, /still on hold/);
+    assert.match(down.message, /still pending/);
     assert.equal(holdActionError(apiError(409, 'INVALID_STATE', 'x', { status: 'IN_PROGRESS' }), 'resume').message, HOLD_MESSAGES.notOnHold);
     assert.equal(holdActionError(apiError(500, 'INTERNAL_ERROR', 'TypeError at pg.js:9'), 'resume').message, HOLD_MESSAGES.resumeServerError);
     const net = holdActionError(apiError(undefined, 'NETWORK_ERROR', 'Cannot reach the server.'), 'resume');
@@ -99,7 +99,7 @@ describe('errors', () => {
 });
 
 describe('the screen (source checks)', () => {
-  const code = read('src/app/transactions/[id]/page.js').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  const code = (read('src/app/transactions/[id]/page.js') + read('src/components/transactions/TransactionDetail.js')).replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
   it('never edits status, hold time or minutes itself', () => {
     assert.ok(!/status\s*:\s*['"](ON_HOLD|IN_PROGRESS)['"]/.test(code));
     assert.ok(!/held_minutes\s*[:+]=|held_minutes\s*\+/.test(code));

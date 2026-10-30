@@ -61,7 +61,7 @@
   @apply mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500;
 }
 @utility input {
-  @apply block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-maroon-800 focus:outline-none focus:ring-1 focus:ring-maroon-800 disabled:bg-slate-100;
+  @apply block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-maroon-800 focus:outline-none focus:ring-1 focus:ring-maroon-800 disabled:bg-slate-100 aria-invalid:border-red-600 aria-invalid:focus:border-red-700 aria-invalid:focus:ring-red-700;
 }
 @utility card {
   @apply rounded-xl border border-line bg-white shadow-sm;
@@ -138,4 +138,47 @@
     url('/Background.png');
   background-size: cover;
   background-position: center;
+}
+
+/* Form feedback: a field with aria-invalid gets the red border (see input above); a read-only value looks like text, not an input. */
+@utility input-readonly {
+  @apply block w-full rounded-md border border-dashed border-slate-300 bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700;
+}
+
+/* A <select> drawn like .input, with its arrow placed inside the field (the browser's own arrow hugs the edge and differs between systems). */
+@utility select-chevron {
+  @apply appearance-none bg-[length:1rem] bg-[right_0.75rem_center] bg-no-repeat pr-9;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%2364748b' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 8 5 5 5-5'/%3E%3C/svg%3E");
+}
+
+/* The office list in the public directory sidebar: a slim, rounded scrollbar in a soft light tone that sits beside the list, not on it. */
+.office-scroll {
+  scrollbar-gutter: stable;
+  scroll-behavior: smooth;
+}
+.office-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.office-scroll::-webkit-scrollbar-track {
+  background: rgb(255 255 255 / 0.1);
+  border-radius: 9999px;
+}
+.office-scroll::-webkit-scrollbar-thumb {
+  background: rgb(255 255 255 / 0.38);
+  border-radius: 9999px;
+}
+.office-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgb(255 255 255 / 0.6);
+}
+/* Firefox has no ::-webkit-scrollbar; it gets the same colours with its own thin bar. */
+@supports not selector(::-webkit-scrollbar) {
+  .office-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(255 255 255 / 0.38) rgb(255 255 255 / 0.1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .office-scroll {
+    scroll-behavior: auto;
+  }
 }

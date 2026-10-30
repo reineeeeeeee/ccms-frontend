@@ -44,12 +44,12 @@ describe('who can start a transaction', () => {
       assert.ok(!appNavForRole(role).some((i) => i.href === '/transactions/new' || i.label === 'Start Transaction'), role);
     }
     const list = read('src/app/transactions/page.js');
-    assert.ok(list.includes('href="/transactions/new"'));
     assert.ok(list.includes('<AddTransactionButton'));
+    assert.ok(!list.includes('href="/transactions/new"'), 'the button opens the modal; it does not navigate');
   });
 
   it('the page is limited to the three roles by the app shell, and the existing menus are unchanged', () => {
-    assert.match(read('src/app/transactions/new/page.js'), /allowedRoles=\{\[ROLES\.SUPER_ADMIN, ROLES\.OFFICE_HEAD, ROLES\.OFFICE_STAFF\]\}/);
+    assert.match((read('src/app/transactions/new/page.js') + read('src/components/transactions/StartTransactionForm.js')), /allowedRoles=\{\[ROLES\.SUPER_ADMIN, ROLES\.OFFICE_HEAD, ROLES\.OFFICE_STAFF\]\}/);
     for (const role of ROLE_LIST) {
       const nav = appNavForRole(role);
       assert.equal(nav[0].href, '/', role);
@@ -82,16 +82,18 @@ describe('loading the services of the office (MOCKED fetcher)', () => {
     assert.deepEqual(items.map((s) => s.service_id), ['a']);
   });
 
-  it('filters by name, code or office and keeps the order; options read "Name (CODE)"', () => {
+  it('filters by name, code or office and keeps the order; options read "Service - Office"', () => {
     const services = [
-      { service_id: '1', service_name: 'Issuance of Clearance', service_code: 'CAMP-ADMIN-CLR-001', office_code: 'CAMP-ADMIN' },
+      { service_id: '1', service_name: 'Issuance of Clearance', service_code: 'CAMP-ADMIN-CLR-001', office_code: 'CAMP-ADMIN', office_name: 'Campus Administration' },
       { service_id: '2', service_name: 'Counseling Service', service_code: 'CAMP-OSAS-CNS-002', office_code: 'CAMP-OSAS' },
     ];
     assert.deepEqual(filterServices(services, 'clear').map((s) => s.service_id), ['1']);
     assert.deepEqual(filterServices(services, 'osas').map((s) => s.service_id), ['2']);
     assert.deepEqual(filterServices(services, 'cns-002').map((s) => s.service_id), ['2']);
     assert.deepEqual(filterServices(services, '  ').map((s) => s.service_id), ['1', '2']);
-    assert.equal(serviceOptionLabel(services[0]), 'Issuance of Clearance (CAMP-ADMIN-CLR-001)');
+    assert.equal(serviceOptionLabel(services[0]), 'Issuance of Clearance - Campus Administration');
+    assert.equal(serviceOptionLabel({ service_name: 'Counseling Service', service_code: 'X' }), 'Counseling Service');
+    assert.deepEqual(filterServices(services, 'campus admin').map((s) => s.service_id), ['1']);
   });
 });
 
@@ -160,7 +162,7 @@ describe('the required-documents checklist', () => {
   it('is rebuilt from the new service\'s documents, so a checked item cannot carry over', () => {
     const other = requirementItems([{ document_id: 'x9', document_name: 'Other form', is_mandatory: true }]);
     assert.equal(allConfirmed(other, allChecked), false);
-    const page = read('src/app/transactions/new/page.js');
+    const page = (read('src/app/transactions/new/page.js') + read('src/components/transactions/StartTransactionForm.js'));
     assert.match(page, /function chooseService\(serviceId\) \{[\s\S]*?setChecks\(\{\}\);/);
   });
 
@@ -231,7 +233,7 @@ describe('the request that is sent (MOCKED fetcher; the body matches Operations 
   it('never carries a tracking number, status, standard or audit data: the server sets those', () => {
     const body = buildStartBody({ form: form({ client_reference: 'R', client_email: 'a@b.co', counter_id: COUNTER }), countersEnabled: true });
     assert.deepEqual(Object.keys(body).sort(), ['client_email', 'client_reference', 'client_type', 'counter_id', 'requirements_confirmed', 'service_id']);
-    const page = read('src/app/transactions/new/page.js') + read('src/lib/ui/start-transaction.js') + read('src/lib/api/transactions.js');
+    const page = (read('src/app/transactions/new/page.js') + read('src/components/transactions/StartTransactionForm.js')) + read('src/lib/ui/start-transaction.js') + read('src/lib/api/transactions.js');
     assert.doesNotMatch(page.split('\n').filter((l) => !l.trim().startsWith('//') && !l.trim().startsWith('*')).join('\n'), /tracking_no\s*[:=]|audit|recordAudit|padStart/i);
   });
 
@@ -245,11 +247,11 @@ describe('the request that is sent (MOCKED fetcher; the body matches Operations 
   });
 
   it('the success view prints the tracking number and status from the response, not a value of its own', () => {
-    const page = read('src/app/transactions/new/page.js');
+    const page = (read('src/app/transactions/new/page.js') + read('src/components/transactions/StartTransactionForm.js'));
     assert.match(page, /\{result\.tracking_no\}/);
     assert.match(page, /statusLabel\(result\.status\)/);
     assert.equal(statusLabel('IN_PROGRESS'), 'In progress');
-    assert.equal(statusLabel('ON_HOLD'), 'On hold');
+    assert.equal(statusLabel('ON_HOLD'), 'Pending');
   });
 });
 
@@ -274,7 +276,7 @@ describe('what a refused start says', () => {
 
   it('a catalogue timeout (after the server\'s own retry) is one clear message, with no retry loop of our own', () => {
     for (const status of [502, 503, 504]) assert.deepEqual(startErrorResult(apiError(status, 'CATALOGUE_UNAVAILABLE', 'Cannot reach the service catalogue right now. Try again, or record the transaction later as a backdated entry.')), { kind: 'unavailable', fieldErrors: {}, message: MESSAGES.catalogueDown });
-    assert.doesNotMatch(read('src/app/transactions/new/page.js'), /setTimeout|setInterval|retry\(/);
+    assert.doesNotMatch((read('src/app/transactions/new/page.js') + read('src/components/transactions/StartTransactionForm.js')), /setTimeout|setInterval|retry\(/);
   });
 
   it('401, 403, network and server errors are safe and never show server detail', () => {
@@ -305,14 +307,17 @@ describe('what a refused start says', () => {
 });
 
 describe('the screen\'s own guards (source checks, not a browser)', () => {
-  const page = read('src/app/transactions/new/page.js');
+  const page = (read('src/app/transactions/new/page.js') + read('src/components/transactions/StartTransactionForm.js'));
 
   it('blocks a second submission while one is running, and the button says so', () => {
     assert.match(page, /const submittingRef = useRef\(false\)/);
     assert.match(page, /if \(submittingRef\.current \|\| locked\) return;/);
     assert.match(page, /submittingRef\.current = true;/);
-    assert.match(page, /disabled=\{submitting \|\| !ready \|\| !settings\.loaded\}/);
-    assert.match(page, /\{submitting \? 'Starting…' : past\.enabled \? \(past\.manual_end \? 'Record past transaction' : 'Start past transaction'\) : 'Start transaction'\}/);
+    // the button is the shared SubmitButton: busy while sending (spinner and "Creating…"), disabled while not ready
+    assert.ok(page.includes('busy={submitting}'));
+    assert.ok(page.includes('disabled={!ready || !settings.loaded}'));
+    assert.ok(page.includes("label={past.enabled ? (past.manual_end ? 'Record past transaction' : 'Start past transaction') : 'Start transaction'}"));
+    assert.ok(page.includes('busyLabel="Creating…"'));
   });
 
   it('the Start button stays disabled until the service, its standard and every document confirmation are in place', () => {
@@ -326,7 +331,7 @@ describe('the screen\'s own guards (source checks, not a browser)', () => {
   });
 
   it('shows the counter picker only when counters are enabled, loaded from the service, with no default', () => {
-    assert.match(page, /\{countersEnabled \? \(\s*<Section title="Counter"/);
+    assert.match(page, /\{countersEnabled \? \(\s*<Section flat=\{embedded\} title="Counter"/);
     assert.match(page, /filter\(\(c\) => c\.is_active\)/);
     assert.match(page, /listCounters\(officeId\)/);
   });
@@ -335,5 +340,163 @@ describe('the screen\'s own guards (source checks, not a browser)', () => {
     const code = page.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
     assert.equal([...code.matchAll(/postTransaction\(/g)].length, 1);
     assert.doesNotMatch(code, /\bPUT\b|\bPATCH\b|\bDELETE\b|apiFetch\(/);
+  });
+});
+
+describe('Add Transaction opens in a modal on the Transactions page (source checks, not a browser)', () => {
+  const list = read('src/app/transactions/page.js');
+  const form = read('src/components/transactions/StartTransactionForm.js');
+  const page = read('src/app/transactions/new/page.js');
+  it('the button opens the modal and no longer navigates', () => {
+    assert.ok(list.includes('<button type="button" onClick={onClick}'));
+    assert.ok(list.includes('setAddOpen(true)'));
+    assert.ok(!list.includes('href="/transactions/new"'));
+  });
+  it('the modal has the width of the other CCMS form modals (max-w-2xl), an X, is full screen on mobile and shows the one shared form', () => {
+    assert.ok(list.includes('title="Add Transaction"'));
+    for (const flag of ['widthClass="max-w-2xl"', 'showClose', 'fullScreenOnMobile', 'onCancel={closeAdd}']) assert.ok(list.includes(flag), flag);
+    assert.ok(read('src/app/services/page.js').includes('widthClass="max-w-2xl"'), 'same width as Add Service');
+    assert.ok(list.includes('<StartTransactionForm key="add" user={user} embedded'));
+    assert.ok(page.includes('<StartTransactionForm user={user} />'), 'the separate page uses the same component');
+  });
+  it('closing with entered data asks first, and cannot happen while the request is sending', () => {
+    assert.ok(list.includes('onClose={addBusy ? undefined : closeAdd}'));
+    assert.ok(list.includes('if (addDirty) setDiscardAsk(true);'));
+    assert.ok(list.includes('title="Discard this transaction?"'));
+  });
+  it('on success the modal closes, a success message with the tracking number shows, and the list is read again from page 1 with the same filters', () => {
+    assert.ok(form.includes('if (embedded && onCreated) onCreated(transaction);'));
+    assert.ok(list.includes('run(applied, 1, pageSize);'));
+    assert.ok(form.includes("notify.success(`${savedMessage('Transaction', 'created')} Tracking number: ${transaction.tracking_no}`)"));
+    assert.ok(!list.includes('setCreated'), 'one success message, from the form');
+  });
+  it('a failed submit goes through the form\'s own error path, so the modal stays open with the values', () => {
+    assert.ok(form.includes('setFieldErrors(fields);'));
+    assert.ok(!/onCreated\([^)]*\)[\s\S]{0,40}catch/.test(form));
+  });
+  it('reports "dirty" and "sending" to the modal', () => {
+    assert.ok(form.includes('onDirtyChange?.(dirty)'));
+    assert.ok(form.includes('onBusyChange?.(submitting)'));
+  });
+});
+
+import { filterOptions } from '../../src/lib/ui/searchable-select.js';
+
+describe('the service picker (searchable dropdown)', () => {
+  const options = [
+    { value: '1', label: 'Application for Replacement of Lost Identification Card', secondary: 'Campus Student Affairs and Services Office', search: 'Application for Replacement of Lost Identification Card PUP-OSAS-ID-002 Campus Student Affairs and Services Office PUP-OSAS' },
+    { value: '2', label: 'Circulation Services', secondary: 'Campus Administrative Office', search: 'Circulation Services PUP-ADMIN-CIR-001 Campus Administrative Office PUP-ADMIN' },
+  ];
+  it('matches the service name, the service code or the office, in any letter case', () => {
+    assert.deepEqual(filterOptions(options, 'lost identification').map((o) => o.value), ['1']);
+    assert.deepEqual(filterOptions(options, 'pup-admin-cir').map((o) => o.value), ['2']);
+    assert.deepEqual(filterOptions(options, 'STUDENT AFFAIRS').map((o) => o.value), ['1']);
+  });
+  it('an empty or blank search keeps every option in order; nothing matching gives none', () => {
+    assert.deepEqual(filterOptions(options, '  ').map((o) => o.value), ['1', '2']);
+    assert.deepEqual(filterOptions(options, 'zzz'), []);
+    assert.deepEqual(filterOptions(options, undefined).length, 2);
+  });
+  it('without a search text it falls back to the label and the secondary line', () => {
+    assert.deepEqual(filterOptions([{ value: 'a', label: 'Alpha', secondary: 'Beta Office' }], 'beta').map((o) => o.value), ['a']);
+  });
+  it('the form uses it with the name, the office underneath, and a list drawn by the page (not a native select)', () => {
+    const form = read('src/components/transactions/StartTransactionForm.js');
+    assert.ok(form.includes('<SearchableSelect'));
+    assert.ok(form.includes('onChange={chooseService}'));
+    assert.ok(!form.includes('<select\n              id="start-service"'));
+    const widget = read('src/components/forms/SearchableSelect.js');
+    for (const token of ['role="combobox"', 'role="listbox"', 'role="option"', 'event.stopPropagation()', "'Escape'", 'break-words', 'getBoundingClientRect', 'fixed z-[70]']) assert.ok(widget.includes(token), token);
+  });
+});
+
+describe('the Add Transaction modal layout (source checks, not a browser)', () => {
+  const list = read('src/app/transactions/page.js');
+  const form = read('src/components/transactions/StartTransactionForm.js');
+  const modal = read('src/components/modals/Modal.js');
+  it('the form lays out its own scrolling area and a separate footer, so the footer can never cover a field', () => {
+    assert.ok(list.includes('flushBody'));
+    assert.ok(form.includes("embedded ? 'flex min-h-0 flex-1 flex-col' : 'space-y-4'"));
+    assert.ok(form.includes('min-h-0 flex-1 space-y-5 overflow-y-auto overflow-x-hidden px-6 pb-6 pt-5'));
+    assert.ok(form.includes('flex shrink-0 flex-wrap items-center justify-end'));
+    assert.ok(form.includes('border-t border-slate-200 bg-white'));
+    assert.ok(!form.includes('sticky bottom-0'), 'no overlay bar inside the scrolling area');
+  });
+  it('the modal panel is a column: fixed header, flexible body, fixed footer, at most 90% of the screen', () => {
+    assert.ok(modal.includes('flex-col overflow-hidden'));
+    assert.ok(modal.includes("flushBody ? 'flex min-h-0 flex-1 flex-col'"));
+    assert.ok(modal.includes('sm:max-h-[90vh]'));
+  });
+  it('the footer is Cancel (secondary) then the primary action, aligned right like the other modals', () => {
+    assert.ok(form.includes('justify-end'));
+    assert.ok(form.includes('className="btn-secondary order-2" onClick={onCancel}'));
+    assert.ok(form.includes("className={`btn-primary${embedded ? ' order-3' : ''}`}"));
+    assert.equal([...form.matchAll(/<SubmitButton/g)].length, 1);
+  });
+});
+
+describe('Standard and Required documents only appear once a service is chosen (source checks, not a browser)', () => {
+  const form = read('src/components/transactions/StartTransactionForm.js');
+  const guarded = (heading) => {
+    const at = form.indexOf(heading);
+    const open = form.lastIndexOf('{form.service_id ? (', at);
+    const close = form.indexOf(') : null}', at);
+    return open > 0 && open < at && close > at && !form.slice(open, at).includes('</Section>');
+  };
+  it('both sections sit inside a "service chosen" condition', () => {
+    assert.ok(guarded('id="standard-heading"'));
+    assert.ok(guarded('id="documents-heading"'));
+  });
+  it('the "choose a service to see..." placeholders are gone', () => {
+    assert.ok(!form.includes('Choose a service to see its standard'));
+    assert.ok(!form.includes('Choose a service to see its required documents'));
+  });
+  it('choosing, changing or clearing a service resets the dependent data at once, and a late answer for an older choice is ignored', () => {
+    assert.ok(form.includes("setStandard({ state: 'loading', data: null, kind: null, message: null });"));
+    assert.ok(form.includes("setDocuments({ state: 'loading', items: [], message: null });"));
+    assert.ok(form.includes('const request = ++latestService.current;'));
+    assert.ok(form.includes('if (!current()) return;'));
+    assert.ok(form.includes('latestService.current += 1;'));
+    assert.ok(form.includes("setStandard({ state: 'idle', data: null, kind: null, message: null });"));
+  });
+  it('the modal form uses flat sections (no card borders) and the page keeps its cards', () => {
+    assert.ok(form.includes("flat ? 'border-b border-slate-200 pb-5 last:border-b-0 last:pb-0' : 'card p-5'"));
+    assert.ok(form.includes('<Section flat={embedded} title="Service"'));
+  });
+});
+
+describe('the Client fields layout (source checks, not a browser)', () => {
+  const form = read('src/components/transactions/StartTransactionForm.js');
+  const section = form.slice(form.indexOf('id="client-heading"'), form.indexOf('</Section>', form.indexOf('id="client-heading"')));
+  it('the three fields are stacked in one column of the same, limited width (not stretched across the whole modal)', () => {
+    assert.ok(section.includes('<div className="grid max-w-md gap-4">'));
+    assert.ok(!section.includes('col-span') && !section.includes('grid-cols'));
+    const at = (id) => section.indexOf(`htmlFor="${id}"`);
+    assert.ok(at('start-client-type') < at('start-email') && at('start-email') < at('start-reference'));
+  });
+  it('keeps the exact reference hint text, the required mark on type, and the shared select arrow', () => {
+    assert.ok(section.includes('Client reference (optional): student number or ID'));
+    assert.ok(section.includes('Client type<RequiredMark />'));
+    assert.ok(section.includes('className="input select-chevron"'));
+  });
+});
+
+describe('the searchable dropdown can open a list wider than a narrow field (source checks, not a browser)', () => {
+  const widget = read('src/components/forms/SearchableSelect.js');
+  it('has an optional minimum list width that is still kept inside the screen', () => {
+    assert.ok(widget.includes('listMinWidth = 0'));
+    assert.ok(widget.includes('Math.min(Math.max(rect.width, listMinWidth), window.innerWidth - 16)'));
+    assert.ok(widget.includes('Math.max(8, Math.min(rect.left, window.innerWidth - width - 8))'));
+    assert.ok(widget.includes('[listMinWidth]'));
+  });
+});
+
+describe('the clear (X) button of the searchable dropdown is optional (source checks, not a browser)', () => {
+  const widget = read('src/components/forms/SearchableSelect.js');
+  it('shows only when clearable, so the Transactions filter has none and the Add Transaction picker keeps its own', () => {
+    assert.ok(widget.includes('clearable = true'));
+    assert.ok(widget.includes('{clearable && selected && !disabled ? ('));
+    assert.ok(widget.includes("clearable ? 'pr-16' : 'pr-9'"));
+    assert.ok(!read('src/components/transactions/StartTransactionForm.js').includes('clearable={false}'));
   });
 });

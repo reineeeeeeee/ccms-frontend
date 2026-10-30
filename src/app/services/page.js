@@ -1,6 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import SubmitButton from '../../components/ui/SubmitButton.js';
+import { notify } from '../../lib/ui/notify.js';
+import { saveFailureMessage, savedMessage } from '../../lib/ui/save-feedback.js';
+import SearchInput from '../../components/forms/SearchInput.js';
+import ClearFiltersButton from '../../components/forms/ClearFiltersButton.js';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ROLES } from 'ccms-shared/roles';
 import AppShell from '../../components/layout/AppShell.js';
 import ConfirmDialog from '../../components/dialogs/ConfirmDialog.js';
@@ -14,6 +19,8 @@ import { toQuery } from '../../lib/api/client.js';
 import { CATALOGUE_API, CLASSIFICATIONS, classificationLabel } from '../../lib/api/catalogue.js';
 import { apiFetch } from '../../lib/auth/session.js';
 import { useFormDirty } from '../../lib/ui/useFormDirty.js';
+import { serviceSaveError } from '../../lib/ui/service-form.js';
+import { useSingleSubmit } from '../../lib/ui/useSingleSubmit.js';
 
 const API = CATALOGUE_API;
 const DEFAULT_PAGE_SIZE = 20;
@@ -31,7 +38,7 @@ function OfficePill({ user }) {
   return (
     <p className="inline-flex items-center gap-2 rounded-full border border-[#EAE3D9] bg-white px-4 py-2 text-sm text-slate-500" data-testid="own-office">
       Your office
-      <span className="font-semibold text-slate-900">{office ? `${office.office_code} · ${office.office_name}` : '—'}</span>
+      <span className="font-semibold text-slate-900">{office ? office.office_name : '—'}</span>
     </p>
   );
 }
@@ -40,7 +47,7 @@ function ServicesManager({ user }) {
   const isAdmin = user.role === ROLES.SUPER_ADMIN;
   // Office Head and Office Staff only ever see their own office's services (the API enforces it too).
   const ownOfficeOnly = user.role === ROLES.OFFICE_HEAD || user.role === ROLES.OFFICE_STAFF;
-  const [filters, setFilters] = useState({ search: '', office_id: '', classification: '', status: 'active' });
+  const [filters, setFilters] = useState({ search: '', office_id: '', classification: '', status: 'all' });
   const [applied, setApplied] = useState(filters);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
@@ -48,10 +55,10 @@ function ServicesManager({ user }) {
   const [state, setState] = useState({ loading: true, items: [], total: 0, error: null });
   const [form, setForm] = useState(null); // { id?, ...fields }
   const [fieldErrors, setFieldErrors] = useState({});
-  const [formError, setFormError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [confirm, setConfirm] = useState(null);
   const formDirty = useFormDirty(form);
+  const once = useSingleSubmit();
 
   useEffect(() => {
     if (ownOfficeOnly) return; // own-office users have no office filter
@@ -60,13 +67,17 @@ function ServicesManager({ user }) {
       .catch(() => setOffices([])); // the office filter is optional
   }, [ownOfficeOnly]);
 
+  const latestRequest = useRef(0); // only the newest request may update the table
   const reload = useCallback(async () => {
+    const request = ++latestRequest.current;
     setState((s) => ({ ...s, loading: true, error: null }));
     try {
       const query = toQuery({ ...applied, office_id: ownOfficeOnly ? undefined : applied.office_id, status: isAdmin ? applied.status : undefined, page, page_size: pageSize });
       const data = await apiFetch(`${API}/services${query}`);
+      if (request !== latestRequest.current) return;
       setState({ loading: false, items: data.items, total: data.total, error: null });
     } catch (err) {
+      if (request !== latestRequest.current) return;
       setState((s) => ({ ...s, loading: false, error: err.message }));
     }
   }, [applied, page, pageSize, isAdmin, ownOfficeOnly]);
@@ -81,8 +92,19 @@ function ServicesManager({ user }) {
     setPage(1);
   }
 
+  const sameFilters = (a, b) => a.search.trim() === b.search.trim() && a.office_id === b.office_id && a.classification === b.classification && a.status === b.status;
+
+  // The search applies after a short pause in typing (Enter, or leaving the field, applies at once).
+  useEffect(() => {
+    if (sameFilters(filters, applied)) return undefined;
+    const timer = setTimeout(() => applyFilters(filters), 400);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- applyFilters only sets state from its argument
+  }, [filters, applied]);
+
   function applyFilters(next) {
     setFilters(next);
+    if (sameFilters(next, applied)) return; // nothing changed: no second request
     setApplied(next);
     setPage(1);
     setState((s) => ({ ...s, loading: true }));
@@ -91,25 +113,35 @@ function ServicesManager({ user }) {
   function openForm(service) {
     setFieldErrors({});
     setFormError(null);
-    setForm(service ? { id: service.service_id, ...serviceToForm(service) } : { ...EMPTY_SERVICE_FORM });
+    setForm(service ? { id: service.service_id, current_standard: service.current_standard ?? null, ...serviceToForm(service) } : { ...EMPTY_SERVICE_FORM });
   }
 
-  async function save(event) {
+  function save(event) {
     event.preventDefault();
-    setSaving(true);
-    setFieldErrors({});
-    setFormError(null);
-    try {
-      if (form.id) await apiFetch(`${API}/services/${form.id}`, { method: 'PUT', body: formToBody(form, false) });
-      else await apiFetch(`${API}/services`, { method: 'POST', body: formToBody(form, true) });
-      setForm(null);
-      await reload();
-    } catch (err) {
-      if (err.details && Object.keys(err.details).length > 0) setFieldErrors(err.details);
-      setFormError(err.message);
-    } finally {
-      setSaving(false);
-    }
+    return once(async () => {
+      setSaving(true);
+      setFieldErrors({});
+      try {
+        if (form.id) {
+          await apiFetch(`${API}/services/${form.id}`, { method: 'PUT', body: formToBody(form, false) });
+          setForm(null);
+          notify.success(savedMessage('Service', 'updated')); // only after the server confirmed
+        } else {
+          // The code in the message is the one Core assigned and returned, not the preview.
+          const data = await apiFetch(`${API}/services`, { method: 'POST', body: formToBody(form, true) });
+          setForm(null);
+          notify.success(data?.service?.service_code ? `${savedMessage('Service', 'created')} Its code is ${data.service.service_code}.` : savedMessage('Service', 'created'));
+        }
+        await reload();
+      } catch (err) {
+        // The form keeps everything that was typed; the service's field errors appear under their own fields.
+        const { details, message } = serviceSaveError(err); // 403, network and server failures get safe messages
+        setFieldErrors(details);
+        notify.error(saveFailureMessage(err, message)); // the form stays open with what was typed
+      } finally {
+        setSaving(false);
+      }
+    });
   }
 
   async function setActive(service, active) {
@@ -117,10 +149,11 @@ function ServicesManager({ user }) {
     try {
       await apiFetch(`${API}/services/${service.service_id}/${active ? 'reactivate' : 'deactivate'}`, { method: 'PATCH' });
       setConfirm(null);
+      notify.success(savedMessage('Service', active ? 'reactivated' : 'deactivated'));
       await reload();
     } catch (err) {
       setConfirm(null);
-      setState((s) => ({ ...s, error: err.message }));
+      notify.error(saveFailureMessage(err, err.message));
     } finally {
       setSaving(false);
     }
@@ -135,7 +168,7 @@ function ServicesManager({ user }) {
       render: (s) => (
         <DataTable.TruncatedCell
           text={s.service_name}
-          subtitle={s.service_code}
+          subtitle={`${s.office_name} · ${s.service_code}`}
           href={`/services/${encodeURIComponent(s.service_id)}`}
         />
       ),
@@ -193,45 +226,39 @@ function ServicesManager({ user }) {
       <ErrorBanner message={state.error} onDismiss={() => setState((s) => ({ ...s, error: null }))} />
 
       <form
-        className="rounded-2xl border border-[#EAE3D9] bg-white p-5"
+        className="card p-5 sm:p-6"
         onSubmit={(e) => {
           e.preventDefault();
           applyFilters(filters);
         }}
       >
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="w-full sm:w-80">
+        <div className="flex flex-wrap items-end gap-x-4 gap-y-4">
+          <div className="w-full sm:w-64">
             <label className="label" htmlFor="svc-search">
               Search
             </label>
-            <div className="relative">
-              <svg aria-hidden="true" viewBox="0 0 24 24" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                <circle cx="11" cy="11" r="7" />
-                <path d="m20 20-3.5-3.5" />
-              </svg>
-              <input id="svc-search" className="input pl-9" placeholder="Search by service name, code or office" value={filters.search} onChange={(e) => setFilters({ ...filters, search: e.target.value })} />
-            </div>
+            <SearchInput id="svc-search" value={filters.search} onChange={(e) => setFilters({ ...filters, search: e.target.value })} onBlur={() => filters.search.trim() !== applied.search.trim() && applyFilters(filters)} />
           </div>
           {ownOfficeOnly ? null : offices.length > 0 ? (
-            <div>
+            <div className="w-full sm:w-52">
               <label className="label" htmlFor="svc-office">
                 Office
               </label>
-              <select id="svc-office" className="input" value={filters.office_id} onChange={(e) => applyFilters({ ...filters, office_id: e.target.value })}>
+              <select id="svc-office" className="input select-chevron" value={filters.office_id} onChange={(e) => applyFilters({ ...filters, office_id: e.target.value })}>
                 <option value="">All offices</option>
                 {offices.map((o) => (
                   <option key={o.office_id} value={o.office_id}>
-                    {o.office_code}
+                    {o.office_name}
                   </option>
                 ))}
               </select>
             </div>
           ) : null}
-          <div>
+          <div className="w-full sm:w-40">
             <label className="label" htmlFor="svc-class">
               Classification
             </label>
-            <select id="svc-class" className="input" value={filters.classification} onChange={(e) => applyFilters({ ...filters, classification: e.target.value })}>
+            <select id="svc-class" className="input select-chevron" value={filters.classification} onChange={(e) => applyFilters({ ...filters, classification: e.target.value })}>
               <option value="">All</option>
               {CLASSIFICATIONS.map((c) => (
                 <option key={c.value} value={c.value}>
@@ -241,22 +268,22 @@ function ServicesManager({ user }) {
             </select>
           </div>
           {isAdmin ? (
-            <div>
+            <div className="w-full sm:w-32">
               <label className="label" htmlFor="svc-status">
                 Status
               </label>
-              <select id="svc-status" className="input" value={filters.status} onChange={(e) => applyFilters({ ...filters, status: e.target.value })}>
+              <select id="svc-status" className="input select-chevron" value={filters.status} onChange={(e) => applyFilters({ ...filters, status: e.target.value })}>
+                <option value="all">All</option>
                 <option value="active">Active</option>
                 <option value="inactive">Inactive</option>
-                <option value="all">All</option>
               </select>
             </div>
           ) : null}
-          <button type="submit" className="btn-secondary">
-            Search
-          </button>
+          {applied.search.trim() || applied.office_id || applied.classification || applied.status !== 'all' ? (
+            <ClearFiltersButton className="w-full sm:w-auto" onClick={() => applyFilters({ search: '', office_id: '', classification: '', status: 'all' })} />
+          ) : null}
           {isAdmin ? (
-            <button type="button" className="btn-primary ml-auto" onClick={() => openForm(null)}>
+            <button type="button" className="btn-primary w-full sm:ml-auto sm:w-auto" onClick={() => openForm(null)}>
               + Add Service
             </button>
           ) : null}
@@ -295,16 +322,13 @@ function ServicesManager({ user }) {
             <button type="button" className="btn-secondary" onClick={() => setForm(null)} disabled={saving}>
               Cancel
             </button>
-            <button type="submit" form="service-form" className="btn-primary" disabled={saving}>
-              {saving ? 'Saving…' : 'Save'}
-            </button>
+            <SubmitButton form="service-form" busy={saving} label="Save" busyLabel={form?.id ? 'Updating…' : 'Creating…'} />
           </>
         }
       >
         {form ? (
           <div className="space-y-4">
-            <ErrorBanner message={formError} />
-            <ServiceForm id="service-form" form={form} setForm={setForm} errors={fieldErrors} offices={form.id ? offices : activeOffices} isNew={!form.id} onSubmit={save} />
+            <ServiceForm id="service-form" form={form} setForm={setForm} errors={fieldErrors} offices={form.id ? offices : activeOffices} isNew={!form.id} onSubmit={save} currentStandard={form.id ? form.current_standard ?? null : null} />
           </div>
         ) : null}
       </Modal>

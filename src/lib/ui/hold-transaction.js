@@ -12,12 +12,12 @@ export const HOLD_MESSAGES = {
   notFound: 'This transaction could not be found.',
   holdDisabled: 'Hold is turned off for this institution, so the transaction cannot be put on hold.',
   notInProgress: 'This transaction is no longer in progress, so it cannot be put on hold. The details have been refreshed.',
-  alreadyOnHold: 'This transaction is already on hold. The details have been refreshed.',
-  notOnHold: 'This transaction is no longer on hold. The details have been refreshed.',
+  alreadyOnHold: 'This transaction is already pending. The details have been refreshed.',
+  notOnHold: 'This transaction is no longer pending. The details have been refreshed.',
   versionConflict: 'This transaction was changed by someone else. The details have been refreshed; check them and try again.',
-  calendarDown: 'The calendar cannot be reached right now, so the transaction could not be resumed. It is still on hold. Please try again in a moment.',
+  calendarDown: 'The calendar cannot be reached right now, so the transaction could not be resumed. It is still pending. Please try again in a moment.',
   holdServerError: 'The transaction could not be put on hold right now. Please try again in a few minutes.',
-  resumeServerError: 'The transaction could not be resumed right now. It is still on hold. Please try again in a few minutes.',
+  resumeServerError: 'The transaction could not be resumed right now. It is still pending. Please try again in a few minutes.',
 };
 
 /** The trimmed reason, or the message that explains why it is not acceptable. Mirrors the server's 1-500 rule. */
@@ -81,6 +81,6 @@ export function holdActionError(err, action) {
   if (status === 409 && code === 'VERSION_CONFLICT') return result('version_conflict', HOLD_MESSAGES.versionConflict, true);
   if (status === 503 && code === 'CALENDAR_UNAVAILABLE') return result('calendar_unavailable', HOLD_MESSAGES.calendarDown);
   if (status === 502 || status === 503 || status === 504) return result('unavailable', action === 'hold' ? HOLD_MESSAGES.holdServerError : HOLD_MESSAGES.calendarDown);
-  if (code === 'NETWORK_ERROR') return result('network', `${err.message}${action === 'resume' ? ' The transaction may still be on hold; the details will be checked again.' : ''}`, action === 'resume');
+  if (code === 'NETWORK_ERROR') return result('network', `${err.message}${action === 'resume' ? ' The transaction may still be pending; the details will be checked again.' : ''}`, action === 'resume');
   return result('server', action === 'hold' ? HOLD_MESSAGES.holdServerError : HOLD_MESSAGES.resumeServerError, true);
 }

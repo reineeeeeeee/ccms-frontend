@@ -85,16 +85,37 @@ export const searchProblem = (text) => (String(text ?? '').trim().length > SEARC
 
 // ---- Names, only from data the log or the accounts list really holds ----
 
-const NAME_KEYS = ['full_name', 'office_name', 'service_name', 'term_name', 'label', 'name'];
+const NAME_KEYS = ['full_name', 'office_name', 'service_name', 'document_name', 'term_name', 'label', 'tracking_no', 'name'];
 
-/** The name of the thing an entry is about, read from its own before/after values ("" when they hold none). */
+/**
+ * The name of the thing an entry is about: the Logs service's own entity_name (a transaction's is its tracking number),
+ * otherwise a name inside the entry's before/after values. "" when there is none, and the page then says so.
+ */
 export function entityName(event) {
+  if (typeof event?.entity_name === 'string' && event.entity_name.trim()) return event.entity_name.trim();
   for (const value of [event.after_value, event.before_value]) {
     if (value === null || typeof value !== 'object' || Array.isArray(value)) continue;
     for (const key of NAME_KEYS) if (typeof value[key] === 'string' && value[key].trim()) return value[key].trim();
   }
   return '';
 }
+
+/**
+ * The name for an entry's affected record. First its own name (entity_name, or a name inside its before/after values).
+ * An older entry with none is looked up by type and ID in lists the page already holds: lookups = { office: Map(id -> name),
+ * account: Map(id -> name), service: Map(id -> name) }. Returns "" when nothing safe is found; the page then says the name is
+ * unavailable. Transactions are never looked up (only their own tracking number is shown), and citizen details are never read.
+ */
+export function resolveEntityName(event, lookups = {}) {
+  const own = entityName(event);
+  if (own) return own;
+  const type = String(event?.entity_type ?? '').toLowerCase();
+  if (type === 'transaction') return '';
+  const found = event?.entity_id ? lookups[type]?.get(event.entity_id) : null;
+  return typeof found === 'string' ? found.trim() : '';
+}
+
+export const NAME_UNAVAILABLE = 'Name unavailable (older entry)';
 
 /** "transaction_settings" -> "Transaction settings". */
 export const entityTypeLabel = (type) => (typeof type === 'string' && type ? humanizeKey(type) : '');
@@ -125,7 +146,8 @@ export function showingRange(page, pageSize, total) {
 // ---- Before / after values ----
 
 export const HIDDEN = '[hidden]';
-const SENSITIVE_KEY = /pass(word|wd)?|secret|token|hash|private[_-]?key|service[_-]?key|authorization|cookie/i;
+// Citizen details (client_email, client_reference, client_name, student number) are never shown, even if an entry carried them.
+const SENSITIVE_KEY = /pass(word|wd)?|secret|token|hash|private[_-]?key|service[_-]?key|authorization|cookie|client[_-]?(email|reference|name)|student[_-]?(no|number)/i;
 const TIME_KEY = /(^|_)(opening_time|closing_time|suspended_from)$/;
 const MAX_DEPTH = 6;
 

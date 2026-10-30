@@ -117,7 +117,7 @@ describe('office list, classification filter and paging', () => {
 });
 
 describe('the screen (source checks)', () => {
-  const page = strip(read('src/app/page.js'));
+  const page = strip(read('src/app/page.js') + read('src/lib/ui/use-catalogue.js')); // the page and the shared catalogue hook it uses
   it('uses one list for both views, so switching the view changes nothing but the layout', () => {
     assert.ok(/const \[view, setView\] = useState\('grid'\)/.test(page));
     assert.ok(/<ViewToggle view=\{view\} onView=\{setView\}/.test(page));
@@ -142,7 +142,7 @@ describe('the screen (source checks)', () => {
   });
   it('links each service to its existing public detail page and Staff Login to the existing login route', () => {
     assert.ok(/`\/public\/\$\{encodeURIComponent\(item\.service_id\)\}`/.test(page));
-    assert.ok(/href="\/login"/.test(page));
+    assert.ok(read('src/components/public/LandingHero.js').includes('href="/login"'), 'the landing page has Staff Login');
     assert.ok(strip(read('src/components/layout/PublicHeader.js')).includes('href="/login"'));
   });
   it('shows no hardcoded service data, counts or processing times', () => {

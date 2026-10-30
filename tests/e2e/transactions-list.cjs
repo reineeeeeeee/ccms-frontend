@@ -105,9 +105,13 @@ const trackings = (page) => page.getByTestId('tx-row').evaluateAll((rows) => row
     const applyColor = await page.getByRole('button', { name: 'Apply filters' }).evaluate((e) => getComputedStyle(e).backgroundColor);
     ok(`${role}: it is a primary (maroon) button labelled Add Transaction, the same colour as Apply filters`, geometry.text === 'Add Transaction' && geometry.color === applyColor && geometry.color === 'rgb(107, 15, 15)', `${geometry.text} ${geometry.color}`);
     await add.focus();
-    ok(`${role}: it is a link a keyboard can reach and activate (opens /transactions/new)`, (await add.getAttribute('href')) === '/transactions/new' && (await page.evaluate(() => document.activeElement?.dataset?.testid)) === 'add-transaction');
+    ok(`${role}: it is a button a keyboard can reach and activate (opens the Add Transaction modal)`, (await add.evaluate((e) => e.tagName)) === 'BUTTON' && (await page.evaluate(() => document.activeElement?.dataset?.testid)) === 'add-transaction');
     await add.click();
-    await page.waitForURL(/\/transactions\/new$/, { timeout: 30000 });
+    await page.locator('#start-service').waitFor({ timeout: 60000 });
+    ok(`${role}: the modal is on the list page (same address), titled Add Transaction`, (await page.getByRole('dialog', { name: 'Add Transaction' }).count()) === 1 && !page.url().includes('/transactions/new'));
+    await page.getByRole('button', { name: 'Close' }).click();
+    // The separate page at /transactions/new still works; the checks below use it.
+    await page.goto(`${BASE}/transactions/new`, { waitUntil: 'load', timeout: 90000 });
     await page.locator('#start-service').waitFor({ timeout: 60000 });
     ok(`${role}: clicking it opens the existing Start Transaction form (with the past-transaction option), and Transactions stays current in the menu`, (await page.locator('#start-past').count()) === 1 && (await nav.locator('a[aria-current="page"]').innerText()).trim() === 'Transactions');
     // The path in the top bar: Transactions > Add Transaction, in charcoal (not the maroon page title).
@@ -268,12 +272,13 @@ const trackings = (page) => page.getByTestId('tx-row').evaluateAll((rows) => row
     await btn(page, 'Apply filters').click();
     await page.getByRole('button', { name: 'Clear filters' }).waitFor();
     await page.waitForFunction(() => window.location.search.includes('status=IN_PROGRESS'));
-    await page.getByTestId('tx-row').first().locator('a').click();
+    await page.getByTestId('tx-row').first().getByRole('button', { name: /View details of/ }).click();
     await page.getByTestId('tracking-no').waitFor({ timeout: 60000 });
     ok('opening a row shows that transaction\'s detail (Manila times, status, tracking number)', log.details.length >= 1 && /CAMP-ADMIN-2026/.test(await page.getByTestId('tracking-no').innerText()) && (await page.getByTestId('status').innerText()) === 'In progress');
-    await page.getByRole('link', { name: /Back to transactions/ }).click();
+    ok('the details open in a modal on the list (same address, no navigation)', (await page.getByRole('dialog', { name: 'Transaction Details' }).count()) === 1 && /\/transactions\?/.test(page.url()));
+    await page.getByRole('button', { name: 'Close' }).click();
     await page.getByTestId('tx-row').first().waitFor({ timeout: 60000 });
-    ok('Back to transactions returns to the same filtered view (filters restored from the address)', (await page.locator('#tx-status').inputValue()) === 'IN_PROGRESS' && log.lists.at(-1).get('status') === 'IN_PROGRESS' && (await page.getByRole('button', { name: 'Clear filters' }).count()) === 1);
+    ok('closing the modal returns to the same filtered view (filters restored from the address)', (await page.locator('#tx-status').inputValue()) === 'IN_PROGRESS' && log.lists.at(-1).get('status') === 'IN_PROGRESS' && (await page.getByRole('button', { name: 'Clear filters' }).count()) === 1);
     await ctx.close();
   }
 

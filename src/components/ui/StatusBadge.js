@@ -46,7 +46,7 @@ export default function StatusBadge({ variant = 'simple', children, className = 
 
   return (
     <span
-      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold select-none ${colorStyle} ${className}`.trim()}
+      className={`inline-flex items-center whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold select-none ${colorStyle} ${className}`.trim()}
     >
       {label}
     </span>

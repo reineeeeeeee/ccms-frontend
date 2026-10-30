@@ -78,7 +78,7 @@ describe('errors', () => {
 
 describe('the screen (source checks)', () => {
   const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
-  const page = strip(read('src/app/transactions/[id]/page.js'));
+  const page = strip((read('src/app/transactions/[id]/page.js') + read('src/components/transactions/TransactionDetail.js')));
   const rules = strip(read('src/lib/ui/cancel-transaction.js'));
   it('sends one cancel call, guarded, behind a dialog with an explicit confirm button', () => {
     assert.equal((page.match(/cancelTransaction\(/g) ?? []).length, 1);

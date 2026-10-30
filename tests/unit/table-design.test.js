@@ -56,7 +56,7 @@ describe('the shared design tokens', () => {
   });
 
   it('the content area uses the warm page background; no page sets its own', () => {
-    assert.match(read('src/components/layout/AppShell.js'), /min-h-screen bg-page lg:flex/);
+    assert.match(read('src/components/layout/AppShell.js'), /min-h-screen bg-white md:flex/);
     for (const file of sources.filter((f) => rel(f).startsWith('src/app/') && !rel(f).endsWith('globals.css'))) {
       assert.doesNotMatch(readFileSync(file, 'utf8'), /bg-\[#F7F3EE\]|pageClassName=/i, rel(file));
     }

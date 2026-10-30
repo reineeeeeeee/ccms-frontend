@@ -1,5 +1,6 @@
 'use client';
 
+import { RequiredMark } from '../../components/forms/Field.js';
 import { useCallback, useEffect, useState } from 'react';
 import ErrorBanner from '../../components/feedback/ErrorBanner.js';
 import DateHint from '../../components/forms/DateHint.js';
@@ -150,24 +151,21 @@ export default function Terms({ canWrite = false, onChanged }) {
               <ErrorBanner message={formError} />
               <div>
                 <label className="label" htmlFor="term_name">
-                  Term name
-                </label>
+                  Term name<RequiredMark /></label>
                 <input id="term_name" className="input" value={form.term_name} onChange={(e) => setForm({ ...form, term_name: e.target.value })} required maxLength={100} autoFocus />
                 {fieldErrors.term_name ? <p className="mt-1 text-xs text-red-700">{fieldErrors.term_name}</p> : null}
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
                   <label className="label" htmlFor="start_date">
-                    Start date
-                  </label>
+                    Start date<RequiredMark /></label>
                   <input id="start_date" type="date" className="input" value={form.start_date} onChange={(e) => setForm({ ...form, start_date: e.target.value })} required aria-describedby="start_date-hint" />
                   <DateHint id="start_date-hint" />
                   {fieldErrors.start_date ? <p className="mt-1 text-xs text-red-700">{fieldErrors.start_date}</p> : null}
                 </div>
                 <div>
                   <label className="label" htmlFor="end_date">
-                    End date
-                  </label>
+                    End date<RequiredMark /></label>
                   <input id="end_date" type="date" className="input" value={form.end_date} onChange={(e) => setForm({ ...form, end_date: e.target.value })} required aria-describedby="end_date-hint" />
                   <DateHint id="end_date-hint" />
                   {fieldErrors.end_date ? <p className="mt-1 text-xs text-red-700">{fieldErrors.end_date}</p> : null}

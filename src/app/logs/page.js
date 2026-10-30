@@ -1,14 +1,18 @@
 'use client';
 
+import SearchInput from '../../components/forms/SearchInput.js';
+import ClearFiltersButton from '../../components/forms/ClearFiltersButton.js';
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { ROLES, ROLE_LABELS } from 'ccms-shared/roles';
 import AppShell from '../../components/layout/AppShell.js';
 import ErrorBanner from '../../components/feedback/ErrorBanner.js';
 import AuditValue from '../../components/ui/AuditValue.js';
+import RoleBadge from '../../components/ui/RoleBadge.js';
 import TableShell, { Table, Th } from '../../components/ui/TableShell.js';
 import TableState from '../../components/ui/TableState.js';
 import Pager from '../../components/navigation/Pager.js';
-import { OFFICES_API } from '../../lib/api/catalogue.js';
+import { CATALOGUE_API, OFFICES_API } from '../../lib/api/catalogue.js';
+import { fetchAllPages } from '../../lib/api/client.js';
 import { ACCOUNTS_API } from '../../lib/api/identity.js';
 import { listAuditEvents } from '../../lib/api/logs.js';
 import { apiFetch } from '../../lib/auth/session.js';
@@ -19,7 +23,8 @@ import {
   auditFilterErrors,
   auditValueTree,
   buildNameMap,
-  entityName,
+  NAME_UNAVAILABLE,
+  resolveEntityName,
   entityTypeLabel,
   searchProblem,
   searchToFilters,
@@ -42,6 +47,7 @@ function AuditLog() {
   const [expanded, setExpanded] = useState(() => new Set());
   const [offices, setOffices] = useState(() => new Map());
   const [accounts, setAccounts] = useState([]);
+  const [serviceNames, setServiceNames] = useState(() => new Map());
   const [seen, setSeen] = useState({ actions: [], types: [] });
   const latest = useRef(0); // the newest request; an older answer that arrives late is thrown away
 
@@ -69,8 +75,12 @@ function AuditLog() {
     apiFetch(OFFICES_API)
       .then((data) => !cancelled && setOffices(new Map((data.items ?? []).map((o) => [o.office_id, { code: o.office_code, name: o.office_name }]))))
       .catch(() => {}); // names are a convenience; the ID is shown without them
-    apiFetch(`${ACCOUNTS_API}?page_size=100`)
-      .then((data) => !cancelled && setAccounts(data.items ?? []))
+    // Every account and service, not just the first page, so older entries can still be given a name.
+    fetchAllPages(ACCOUNTS_API, apiFetch)
+      .then((items) => !cancelled && setAccounts(items))
+      .catch(() => {});
+    fetchAllPages(`${CATALOGUE_API}/services`, apiFetch, { extra: { status: 'all' } })
+      .then((items) => !cancelled && setServiceNames(new Map(items.map((s) => [s.service_id, s.service_name]))))
       .catch(() => {});
     return () => {
       cancelled = true;
@@ -78,6 +88,10 @@ function AuditLog() {
   }, []);
 
   const names = useMemo(() => buildNameMap(accounts, state.items), [accounts, state.items]);
+  const lookups = useMemo(
+    () => ({ account: names, service: serviceNames, office: new Map([...offices].map(([id, o]) => [id, o.name])) }),
+    [names, serviceNames, offices],
+  );
 
   async function run(filters, page, search = appliedSearch, requestedPageSize = pageSize) {
     const id = ++latest.current;
@@ -95,12 +109,13 @@ function AuditLog() {
     }
   }
 
-  function apply(event) {
-    event.preventDefault();
-    const match = searchToFilters(draft.search, seen);
-    const filters = { ...EMPTY_AUDIT_FILTERS, ...match.filter, from: draft.from, to: draft.to };
+  // Applies these values now: a date as soon as it is chosen, the search text on Enter or when the field is left.
+  function applyNow(next) {
+    setDraft(next);
+    const match = searchToFilters(next.search, seen);
+    const filters = { ...EMPTY_AUDIT_FILTERS, ...match.filter, from: next.from, to: next.to };
     const errors = auditFilterErrors(filters);
-    const tooLong = searchProblem(draft.search);
+    const tooLong = searchProblem(next.search);
     if (tooLong) errors.search = tooLong;
     delete errors.actor;
     delete errors.action;
@@ -108,8 +123,21 @@ function AuditLog() {
     setFieldErrors(errors);
     if (Object.keys(errors).length) return;
     // A new search or date range always starts again at page 1.
-    run(filters, 1, match.field ? { text: draft.search.trim(), field: match.field, value: match.value } : null);
+    run(filters, 1, match.field ? { text: next.search.trim(), field: match.field, value: match.value } : null);
   }
+
+  function apply(event) {
+    event.preventDefault();
+    applyNow(draft);
+  }
+
+  // The search applies after a short pause in typing (Enter, or leaving the field, applies at once).
+  useEffect(() => {
+    if (draft.search.trim() === (appliedSearch?.text ?? '')) return undefined;
+    const timer = setTimeout(() => applyNow(draft), 400);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- applyNow reads the values it is given
+  }, [draft, appliedSearch]);
 
   function clear() {
     setDraft({ search: '', from: '', to: '' });
@@ -139,19 +167,17 @@ function AuditLog() {
     <div className="space-y-4">
       <ErrorBanner message={state.error} onDismiss={() => setState((current) => ({ ...current, error: null }))} />
 
-      <form className="card p-4" onSubmit={apply} noValidate aria-label="Filter the audit log">
-        <div className="flex flex-wrap items-start gap-3">
+      <form className="card p-5 sm:p-6" onSubmit={apply} noValidate aria-label="Filter the audit log">
+        <div className="flex flex-wrap items-start gap-x-4 gap-y-4">
           <div className="w-full sm:w-64">
             <label className="label" htmlFor="audit-search">
               Search
             </label>
-            <input
+            <SearchInput
               id="audit-search"
-              type="text"
-              className="input"
               value={draft.search}
               onChange={set('search')}
-              placeholder="Search by user ID, action or entity"
+              onBlur={() => draft.search.trim() !== (appliedSearch?.text ?? '') && applyNow(draft)}
               autoComplete="off"
               spellCheck={false}
               aria-invalid={fieldErrors.search ? true : undefined}
@@ -166,26 +192,21 @@ function AuditLog() {
             <label className="label" htmlFor="audit-from">
               Start date
             </label>
-            <input id="audit-from" type="date" className="input" value={draft.from} onChange={set('from')} aria-invalid={fieldErrors.from ? true : undefined} aria-describedby={describedBy('from')} />
+            <input id="audit-from" type="date" className="input" value={draft.from} onChange={(e) => applyNow({ ...draft, from: e.target.value })} aria-invalid={fieldErrors.from ? true : undefined} aria-describedby={describedBy('from')} />
             {fieldError('from')}
           </div>
           <div className="w-full sm:w-36">
             <label className="label" htmlFor="audit-to">
               End date
             </label>
-            <input id="audit-to" type="date" className="input" value={draft.to} onChange={set('to')} aria-invalid={fieldErrors.to ? true : undefined} aria-describedby={describedBy('to')} />
+            <input id="audit-to" type="date" className="input" value={draft.to} onChange={(e) => applyNow({ ...draft, to: e.target.value })} aria-invalid={fieldErrors.to ? true : undefined} aria-describedby={describedBy('to')} />
             {fieldError('to')}
           </div>
-          <div className="flex items-center gap-3 sm:mt-[21px]">
-            <button
-              type={filtered ? 'button' : 'submit'}
-              className={filtered ? 'btn border border-maroon-800 bg-transparent px-3! text-maroon-800 hover:bg-maroon-50' : 'btn-primary px-3!'}
-              onClick={filtered ? clear : undefined}
-              disabled={state.loading}
-            >
-              {filtered ? 'Clear filters' : 'Apply filters'}
-            </button>
-          </div>
+          {filtered ? (
+            <div className="sm:mt-[21px]">
+              <ClearFiltersButton onClick={clear} disabled={state.loading} />
+            </div>
+          ) : null}
         </div>
       </form>
 
@@ -236,7 +257,7 @@ function AuditLog() {
                   const actorNameText = names.get(event.actor_user_id) ?? '';
                   const { date, time } = splitDateTime(formatDateTime(event.occurred_at) || '-');
                   const office = event.office_id ? offices.get(event.office_id) : null;
-                  const subject = entityName(event);
+                  const subject = resolveEntityName(event, lookups);
                   const detailId = `audit-detail-${event.audit_id}`;
                   const roleLabel = ROLE_LABELS[event.actor_role] ?? (event.actor_role === 'system' ? 'System' : event.actor_role || '');
                   return (
@@ -250,10 +271,15 @@ function AuditLog() {
                         <td className="td">
                           {actorNameText ? (
                             <span className="block font-semibold text-slate-900" title={actorId || undefined}>{actorNameText}</span>
+                          ) : event.actor_role === 'system' ? (
+                            <span className="block font-semibold text-slate-900">System</span>
                           ) : (
-                            <span className="block font-mono font-semibold text-slate-900" title={actorId || undefined}>{shortId(actorId) || '-'}</span>
+                            <>
+                              <span className="block font-semibold text-slate-500">User name unavailable</span>
+                              {actorId ? <span className="block font-mono text-xs text-slate-500" title={actorId}>{shortId(actorId)}</span> : null}
+                            </>
                           )}
-                          {roleLabel ? <span className="block text-slate-500">{roleLabel}</span> : null}
+                          {ROLE_LABELS[event.actor_role] ? <span className="mt-1 block"><RoleBadge role={event.actor_role} /></span> : roleLabel ? <span className="block text-slate-500">{roleLabel}</span> : null}
                         </td>
                         <td className="td">
                           <span className="inline-flex max-w-full items-center rounded-full border border-[#F0DDB0] bg-[#FBEFCF] px-2.5 py-0.5 text-[11px] font-semibold tracking-wide text-[#5C3B00]">{event.action || '-'}</span>
@@ -262,7 +288,10 @@ function AuditLog() {
                           {subject ? (
                             <span className="block font-semibold text-slate-900">{subject}</span>
                           ) : (
-                            <span className="block font-mono font-semibold text-slate-900" title={event.entity_id || undefined}>{shortId(event.entity_id) || '-'}</span>
+                            <>
+                              <span className="block font-semibold text-slate-500">{NAME_UNAVAILABLE}</span>
+                              <span className="block font-mono text-xs text-slate-500" title={event.entity_id || undefined}>{shortId(event.entity_id) || '-'}</span>
+                            </>
                           )}
                           {event.entity_type ? <span className="block text-slate-500">{entityTypeLabel(event.entity_type)}</span> : null}
                         </td>
@@ -270,8 +299,8 @@ function AuditLog() {
                           {event.office_id ? (
                             office ? (
                               <>
-                                <span className="block font-bold text-slate-900">{office.code}</span>
-                                <span className="block text-slate-500">{office.name}</span>
+                                <span className="block font-bold text-slate-900">{office.name}</span>
+                                <span className="block text-slate-500">{office.code}</span>
                               </>
                             ) : (
                               <span className="block font-mono font-semibold text-slate-900" title={event.office_id}>{shortId(event.office_id)}</span>

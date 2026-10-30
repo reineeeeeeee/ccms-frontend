@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 import { TRANSACTIONS_API, completeTransaction } from '../../src/lib/api/transactions.js';
-import { COMPLETE_MESSAGES, canComplete, complianceState, completeErrorResult, describeElapsed, describeVariance, mustResumeFirst, reconcileBanner } from '../../src/lib/ui/complete-transaction.js';
+import { COMPLETE_MESSAGES, COMPLIANCE_LABELS, canComplete, complianceState, completeErrorResult, describeElapsed, describeVariance, mustResumeFirst, reconcileBanner } from '../../src/lib/ui/complete-transaction.js';
 
 // MOCKED fetchers and error objects shaped like the real contract (Operations complete.js, dto.js, compliance.js).
 const read = (path) => readFileSync(fileURLToPath(new URL(`../../${path}`, import.meta.url)), 'utf8');
@@ -49,11 +49,17 @@ describe('compliance state comes only from the server\'s fields', () => {
 });
 
 describe('values the server returned, only worded', () => {
-  it('variance: negative under, positive over, zero on the limit', () => {
-    assert.equal(describeVariance(-5), '5 minutes under the limit');
-    assert.equal(describeVariance(1), '1 minute over the limit');
-    assert.equal(describeVariance(0), 'On the limit (0 minutes)');
+  it('variance (backend sign convention): negative = early, positive = late, zero = exactly on time', () => {
+    assert.equal(describeVariance(-5), 'Early by 5 minutes');
+    assert.equal(describeVariance(1), 'Late by 1 minute');
+    assert.equal(describeVariance(90), 'Late by 1 hour 30 minutes');
+    assert.equal(describeVariance(-120), 'Early by 2 hours');
+    assert.equal(describeVariance(0), 'On time (exactly at the standard)');
     assert.equal(describeVariance(null), null);
+    assert.equal(describeVariance('abc'), null);
+  });
+  it('timeliness and result labels are display-only changes', () => {
+    assert.deepEqual(COMPLIANCE_LABELS, { compliant: 'On time', breach: 'Late', pending: 'Awaiting result' });
   });
   it('elapsed minutes', () => {
     assert.equal(describeElapsed(61), '61 minutes');
@@ -101,7 +107,7 @@ describe('after an unclear outcome the server status decides the message', () =>
 
 describe('the screen and helpers (source checks)', () => {
   const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
-  const page = strip(read('src/app/transactions/[id]/page.js'));
+  const page = strip((read('src/app/transactions/[id]/page.js') + read('src/components/transactions/TransactionDetail.js')));
   const rules = strip(read('src/lib/ui/complete-transaction.js'));
   const api = strip(read('src/lib/api/transactions.js'));
   it('uses no browser clock and does no compliance arithmetic', () => {

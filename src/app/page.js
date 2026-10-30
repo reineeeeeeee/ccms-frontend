@@ -1,35 +1,17 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import AppShell from '../components/layout/AppShell.js';
-import PublicHeader from '../components/layout/PublicHeader.js';
+import LandingHero from '../components/public/LandingHero.js';
 import ErrorBanner from '../components/feedback/ErrorBanner.js';
 import Pager from '../components/navigation/Pager.js';
 import StatusBadge from '../components/ui/StatusBadge.js';
-import { BRAND } from '../lib/constants/brand.js';
 import { mightBeSignedIn, refreshSession } from '../lib/auth/session.js';
-import { listAllPublicServices } from '../lib/api/public-services.js';
+import { useCatalogue } from '../lib/ui/use-catalogue.js';
 import { classificationLabel } from '../lib/api/catalogue.js';
-import { CLASSIFICATION_FILTERS, PUBLIC_PAGE_SIZE, PUBLIC_PAGE_SIZES, clampPage, filterServices, hasNarrowing, officeOptions, pageOf } from '../lib/ui/public-catalogue.js';
+import { CLASSIFICATION_FILTERS, PUBLIC_PAGE_SIZES, hasNarrowing } from '../lib/ui/public-catalogue.js';
 
-
-// Quick links under the hero. Each one does something real on this page.
-const TILES = [
-  { title: 'Browse all services', text: 'See every service the University offers, A to Z.', action: 'browse', icon: 'M4 6h16M4 12h16M4 18h10' },
-  { title: 'Find by office', text: 'Type an office name to see only its services.', action: 'search', icon: 'M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6' },
-  { title: 'What to bring', text: 'Open any service to see its requirements and steps.', action: 'browse', icon: 'M9 12l2 2 4-4M7 3h10a2 2 0 012 2v14a2 2 0 01-2 2H7a2 2 0 01-2-2V5a2 2 0 012-2z' },
-];
-
-function TileIcon({ path }) {
-  return (
-    <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-maroon-50 text-maroon-800">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6" aria-hidden="true">
-        <path d={path} />
-      </svg>
-    </span>
-  );
-}
 
 function SearchIcon() {
   return (
@@ -38,76 +20,6 @@ function SearchIcon() {
       <path d="M14 14l4 4" strokeLinecap="round" />
     </svg>
   );
-}
-
-// The search text, the filters, the view and the page, shared by the signed-out and signed-in home. One list of services (all the
-// pages the public API returns for the search); classification, office, counting and paging are worked out from it, so the Grid and
-// the List always show the same thing and switching view keeps every filter and the page.
-function useCatalogue() {
-  const [input, setInput] = useState('');
-  const [search, setSearch] = useState('');
-  const [classification, setClassification] = useState('');
-  const [office, setOffice] = useState('');
-  const [view, setView] = useState('grid');
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(PUBLIC_PAGE_SIZE);
-  const [attempt, setAttempt] = useState(0); // bumped by "Try again"
-  const [state, setState] = useState({ loading: true, all: [], truncated: false, error: null });
-  const latest = useRef(0); // the newest request; an older answer that arrives late is thrown away
-  useEffect(() => {
-    const id = ++latest.current;
-    listAllPublicServices(search)
-      .then((data) => {
-        if (id === latest.current) setState({ loading: false, all: data.items, truncated: data.truncated, error: null });
-      })
-      .catch((err) => {
-        if (id === latest.current) setState({ loading: false, all: [], truncated: false, error: err.message });
-      });
-    return () => {
-      latest.current += 1;
-    };
-  }, [search, attempt]);
-
-  const offices = useMemo(() => officeOptions(state.all, office), [state.all, office]);
-  const filtered = useMemo(() => filterServices(state.all, { classification, office }), [state.all, classification, office]);
-  const currentPage = clampPage(page, filtered.length, pageSize);
-  const items = useMemo(() => pageOf(filtered, currentPage, pageSize), [filtered, currentPage, pageSize]);
-
-  const loading = () => setState((s) => ({ ...s, loading: true, error: null }));
-
-  function onSubmit(event) {
-    event.preventDefault();
-    if (input.trim() !== search.trim()) loading();
-    setPage(1);
-    setSearch(input.trim());
-  }
-
-  function onClear() {
-    if (search) loading();
-    setInput('');
-    setSearch('');
-    setClassification('');
-    setOffice('');
-    setPage(1);
-  }
-
-  function browseAll() {
-    onClear();
-    document.getElementById('services')?.scrollIntoView({ behavior: 'smooth' });
-  }
-
-  function retry() {
-    loading();
-    setAttempt((n) => n + 1);
-  }
-
-  // A new classification or office starts again at page 1; changing the view or the page does not touch the filters.
-  const chooseClassification = (value) => { setClassification(value); setPage(1); };
-  const chooseOffice = (value) => { setOffice(value); setPage(1); };
-  // A different page size starts again at page 1; the search and filters stay.
-  const changePageSize = (size) => { setPageSize(size); setPage(1); };
-
-  return { input, setInput, search, classification, office, view, setView, page: currentPage, setPage, pageSize, changePageSize, state, offices, items, total: filtered.length, onSubmit, onClear, browseAll, retry, chooseClassification, chooseOffice };
 }
 
 function OfficeIcon() {
@@ -387,77 +299,6 @@ function SignedInHome() {
   );
 }
 
-// Signed out: the public landing page. No session needed and no redirect. Staff use Staff Login.
-function PublicHome() {
-  const catalogue = useCatalogue();
-  const { input, setInput, onSubmit, browseAll } = catalogue;
-
-  function focusSearch() {
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-    document.getElementById('public-search')?.focus();
-  }
-
-  return (
-    <div className="flex min-h-screen flex-col bg-page">
-      <section className="hero-bg relative text-white">
-        <PublicHeader overlay />
-        <div className="mx-auto max-w-3xl px-4 pb-28 pt-32 text-center sm:pt-36">
-          <h1 className="font-serif text-4xl font-normal leading-tight text-white sm:text-5xl">Find a service. Know what to bring and how long it takes.</h1>
-          <p className="mx-auto mt-5 max-w-xl text-white/90">Search the Citizen&rsquo;s Charter of {BRAND.campus} before you visit an office.</p>
-          <form onSubmit={onSubmit} className="mx-auto mt-8 flex max-w-2xl overflow-hidden rounded-xl bg-white p-1.5 shadow-lg" role="search">
-            <label className="sr-only" htmlFor="public-search">
-              Search services or offices
-            </label>
-            <SearchIcon />
-            <input
-              id="public-search"
-              type="search"
-              className="min-w-0 flex-1 bg-transparent px-3 py-3 text-slate-900 placeholder:text-slate-500 focus:outline-none"
-              placeholder="Search by service or office name"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-            />
-            <button type="submit" className="shrink-0 rounded-lg bg-gold-500 px-6 text-sm font-bold text-maroon-950 hover:bg-gold-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-maroon-900">
-              Search
-            </button>
-          </form>
-        </div>
-      </section>
-
-      <section className="relative z-10 mx-auto -mt-14 w-full max-w-6xl px-4" aria-label="Quick links">
-        <ul className="grid gap-4 md:grid-cols-3">
-          {TILES.map((tile) => (
-            <li key={tile.title}>
-              <button
-                type="button"
-                onClick={tile.action === 'browse' ? browseAll : focusSearch}
-                className="flex h-full w-full items-start gap-4 rounded-2xl border border-[#EAE3D9] bg-white p-5 text-left shadow-md transition hover:-translate-y-0.5 hover:shadow-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-maroon-800"
-              >
-                <TileIcon path={tile.icon} />
-                <span className="min-w-0">
-                  <span className="block font-semibold text-slate-900">{tile.title}</span>
-                  <span className="mt-1 block text-sm text-slate-600">{tile.text}</span>
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-12">
-        <ServiceResults catalogue={catalogue} />
-      </main>
-
-      <footer className="border-t border-[#EAE3D9] px-4 py-6 text-center text-sm text-slate-500">
-        {BRAND.campus} &middot; {BRAND.fullName} &middot;{' '}
-        <Link href="/login" className="font-semibold text-maroon-800 hover:underline">
-          Staff login
-        </Link>
-      </footer>
-    </div>
-  );
-}
-
 export default function Landing() {
   // Keep the server render and the first browser render identical. Session state is browser-only,
   // so choose the public or signed-in page after hydration in the effect below.
@@ -484,6 +325,6 @@ export default function Landing() {
   }, []);
 
   if (mode === 'signed-in') return <SignedInHome />;
-  if (mode === 'public') return <PublicHome />;
+  if (mode === 'public') return <LandingHero />;
   return <div className="flex min-h-screen items-center justify-center text-sm text-slate-500" aria-busy="true">Checking your session…</div>;
 }

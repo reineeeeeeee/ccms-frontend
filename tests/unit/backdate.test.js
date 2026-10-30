@@ -142,7 +142,7 @@ describe('the two extra reads (MOCKED fetcher)', () => {
 
 describe('the screen (source checks)', () => {
   const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
-  const page = strip(read('src/app/transactions/new/page.js'));
+  const page = strip((read('src/app/transactions/new/page.js') + read('src/components/transactions/StartTransactionForm.js')));
   const rules = strip(read('src/lib/ui/backdate.js'));
   it('has one create call; no completion call; no job, report or audit calls', () => {
     assert.equal((page.match(/postTransaction\(/g) ?? []).length, 1);
@@ -220,7 +220,7 @@ describe('completing an open transaction with an end time entered by hand (MOCKE
   });
   it('the screen has one completion call, the manual end is checked before anything is sent, and no start is ever sent', () => {
     const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
-    const page = strip(read('src/app/transactions/[id]/page.js'));
+    const page = strip((read('src/app/transactions/[id]/page.js') + read('src/components/transactions/TransactionDetail.js')));
     assert.equal((page.match(/completeTransaction\(/g) ?? []).length, 1);
     assert.ok(/manualEndErrors\(manualEnd, tx\.started_at, Date\.now\(\)\)/.test(page));
     assert.ok(/completeTransaction\(id, undefined, completionBody\(manualEnd\)\)/.test(page));

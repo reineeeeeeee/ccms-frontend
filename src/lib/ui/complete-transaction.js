@@ -6,13 +6,13 @@
 export const COMPLETE_MESSAGES = {
   confirmTitle: 'Complete this transaction?',
   confirm: 'Completing records the end time now and checks the transaction against the standard that was saved when it started. This cannot be undone.',
-  onHold: 'This transaction is on hold. Resume it before completing it.',
+  onHold: 'This transaction is pending. Resume it before completing it.',
   sessionEnded: 'Your session has ended. Please sign in again.',
   forbidden: 'You do not have permission to complete this transaction.',
   notFound: 'This transaction could not be found.',
   alreadyCompleted: 'This transaction was already completed. The details have been refreshed.',
   notInProgress: 'This transaction is no longer in progress, so it cannot be completed. The details have been refreshed.',
-  mustResume: 'This transaction is on hold. Resume it before completing it. The details have been refreshed.',
+  mustResume: 'This transaction is pending. Resume it before completing it. The details have been refreshed.',
   unknownOutcome: 'We could not confirm whether the transaction was completed. Its current state is being checked; please do not try again until it is.',
   unknownStillUnclear: 'We still cannot tell whether the transaction was completed. Use "Check status" before trying again.',
   completedAfterUnknown: 'The transaction was completed. The details below come from the server.',
@@ -24,7 +24,7 @@ export const COMPLETE_MESSAGES = {
 /** Complete is offered only for a transaction the server reports as IN_PROGRESS. Who may act is decided by the server. */
 export const canComplete = (transaction) => transaction?.status === 'IN_PROGRESS';
 
-/** On hold: no Complete button, but the person is told why. */
+/** Pending (ON_HOLD): no Complete button, but the person is told why. */
 export const mustResumeFirst = (transaction) => transaction?.status === 'ON_HOLD';
 
 /**
@@ -42,16 +42,29 @@ export function complianceState(transaction) {
   return 'none';
 }
 
-export const COMPLIANCE_LABELS = { compliant: 'Compliant', breach: 'Breach', pending: 'Pending computation' };
+// Display labels only: the keys are this file's own states, and the API's is_compliant / status values are not renamed.
+export const COMPLIANCE_LABELS = { compliant: 'On time', breach: 'Late', pending: 'Awaiting result' };
 
 const minutesText = (n) => `${n} ${n === 1 ? 'minute' : 'minutes'}`;
 
-/** The server's variance, worded: negative = before the deadline, positive = late, 0 = exactly on it. Display only. */
+/** 90 -> "1 hour 30 minutes", 45 -> "45 minutes". These are working minutes, so hours are only a regrouping of them. */
+export function durationText(totalMinutes) {
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours === 0) return minutesText(minutes);
+  const hourPart = `${hours} ${hours === 1 ? 'hour' : 'hours'}`;
+  return minutes === 0 ? hourPart : `${hourPart} ${minutesText(minutes)}`;
+}
+
+/**
+ * The API's variance_minutes, worded. Sign convention (Operations compliance rules): negative = finished before the
+ * deadline (early), positive = finished after it (late), 0 = exactly on the deadline (on time). Display only.
+ */
 export function describeVariance(variance) {
   if (variance == null || !Number.isFinite(Number(variance))) return null;
   const n = Number(variance);
-  if (n === 0) return 'On the limit (0 minutes)';
-  return n < 0 ? `${minutesText(-n)} under the limit` : `${minutesText(n)} over the limit`;
+  if (n === 0) return 'On time (exactly at the standard)';
+  return n < 0 ? `Early by ${durationText(-n)}` : `Late by ${durationText(n)}`;
 }
 
 /** The server's elapsed working minutes as "N minutes" (no conversion), or null while there is none. */
