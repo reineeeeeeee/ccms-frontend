@@ -1,5 +1,6 @@
 'use client';
 
+import { sortNewestFirst } from '../../lib/ui/newest-first.js';
 import SubmitButton from '../../components/ui/SubmitButton.js';
 import { notify } from '../../lib/ui/notify.js';
 import { saveFailureMessage, savedMessage } from '../../lib/ui/save-feedback.js';
@@ -70,7 +71,8 @@ function OfficesManager() {
 
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase();
-    return state.items.filter(
+    // Newest first (by created_at), so an office that was just added is the first row.
+    return sortNewestFirst(state.items).filter(
       (o) =>
         (status === '' || (status === 'active') === o.is_active) &&
         (!term || o.office_code.toLowerCase().includes(term) || o.office_name.toLowerCase().includes(term)),

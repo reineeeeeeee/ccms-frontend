@@ -51,6 +51,17 @@ export async function listStartableServices({ isSuperAdmin = false } = {}, fetch
   return items;
 }
 
+/** Every service, active or not (all pages), with its `is_active` kept: for pickers that list inactive ones in gray and disabled. */
+export async function listSelectableServices(fetcher = apiFetch) {
+  const items = [];
+  for (let page = 1; page <= 50; page += 1) {
+    const data = await fetcher(`${SERVICES_API}?page=${page}&page_size=${SERVICE_LIST_PAGE_SIZE}`);
+    items.push(...(data.items ?? []));
+    if (page * SERVICE_LIST_PAGE_SIZE >= (data.total ?? 0) || (data.items ?? []).length === 0) break;
+  }
+  return items;
+}
+
 /** The standard in force today. No asOf: the server uses its own Manila date, so the browser never works one out. */
 export const getServiceStandard = (serviceId, fetcher = apiFetch) => fetcher(`${serviceUrl(serviceId)}/standard`);
 

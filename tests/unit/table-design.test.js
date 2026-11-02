@@ -148,10 +148,11 @@ describe('pagination is the one shared Pager', () => {
       assert.match(text, /const \[pageSize, setPageSize\] = useState\(/, file);
       assert.match(text, /onPageSizeChange[=:] ?\{?changePageSize\}?/, file);
       assert.match(text, /function changePageSize\(\w+\)|changePageSize = /, file);
-      assert.doesNotMatch(text, /\.slice\(\s*\(page - 1\)/, `${file} must not page on the client`);
+      if (file === 'src/app/logs/page.js') assert.doesNotMatch(text, /\.slice\(\s*\(page - 1\)/, `${file} must not page on the client`);
+      else assert.ok(text.includes('pageSlice('), `${file} pages its newest-first list here`);
     }
-    assert.match(read('src/app/accounts/page.js'), /page_size: String\(pageSize\)/);
-    assert.match(read('src/app/services/page.js'), /page_size: pageSize/);
+    assert.match(read('src/app/accounts/page.js'), /page_size: String\(size\)/);
+    assert.match(read('src/app/services/page.js'), /page_size: size/);
     assert.match(read('src/app/accounts/page.js'), /setPageSize\(size\);\s*setPage\(1\);/);
     assert.match(read('src/app/services/page.js'), /setPageSize\(size\);\s*setPage\(1\);/);
   });

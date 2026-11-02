@@ -136,8 +136,8 @@ export function validateServiceForm(form, isNew) {
     Object.assign(errors, durationErrors(form));
     if (blank(form.effective_from)) errors.effective_from = 'Enter the date the standard starts.';
     const reference = form.charter_reference.replace(/\s+/g, ' ').trim();
-    if (!reference) errors.charter_reference = 'Enter the Charter reference.';
-    else if (reference.length > CHARTER_REFERENCE_MAX) errors.charter_reference = `Charter reference must be ${CHARTER_REFERENCE_MAX} characters or fewer.`;
+    // The Charter reference is optional: empty is fine, only a too-long one is a problem.
+    if (reference.length > CHARTER_REFERENCE_MAX) errors.charter_reference = `Charter reference must be ${CHARTER_REFERENCE_MAX} characters or fewer.`;
   }
   return errors;
 }

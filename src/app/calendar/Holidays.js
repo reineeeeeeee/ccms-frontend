@@ -1,5 +1,6 @@
 'use client';
 
+import RecordOption from '../../components/forms/RecordOption.js';
 import SubmitButton from '../../components/ui/SubmitButton.js';
 import { notify } from '../../lib/ui/notify.js';
 import { saveFailureMessage, savedMessage } from '../../lib/ui/save-feedback.js';
@@ -15,6 +16,7 @@ import Modal from '../../components/modals/Modal.js';
 import { formatDate, formatTime } from '../../lib/ui/date-format.js';
 import { CATALOGUE_SETTINGS_API, OFFICES_API } from '../../lib/api/catalogue.js';
 import { apiFetch } from '../../lib/auth/session.js';
+import { suspensionTimes, timeInputValue, unmatchedErrorMessages } from '../../lib/ui/time-input.js';
 import { useFormDirty } from '../../lib/ui/useFormDirty.js';
 import {
   APPLIES_TO,
@@ -40,7 +42,7 @@ import {
 } from '../../lib/api/calendar.js';
 
 const EXCEPTIONS_API = '/api/calendar/exceptions';
-const EMPTY_FORM = { exception_date: '', exception_type: 'REGULAR_HOLIDAY', description: '', office_id: '', suspended_from: '', is_recurring: false, applies_to: 'BOTH', class_mode: 'SUSPENDED' };
+const EMPTY_FORM = { exception_date: '', exception_type: 'REGULAR_HOLIDAY', description: '', office_id: '', suspended_from: '', suspended_until: '', is_recurring: false, applies_to: 'BOTH', class_mode: 'SUSPENDED' };
 
 export default function Holidays({ canWrite = false, onChanged }) {
   const today = todayManila();
@@ -150,6 +152,10 @@ export default function Holidays({ canWrite = false, onChanged }) {
     setSelected(date);
   }
 
+  // Core's messages for fields this form has no input for (the class fields while the setting is off, or any other name) show in the form's banner.
+  const shownFields = ['exception_date', 'exception_type', 'description', 'office_id', 'suspended_from', 'suspended_until', 'is_recurring', ...(enabled ? ['applies_to', ...(form?.applies_to !== 'WORK' ? ['class_mode'] : [])] : [])];
+  const formLevelErrors = unmatchedErrorMessages(fieldErrors, shownFields);
+
   function openForm(date) {
     setFieldErrors({});
     setForm({ ...EMPTY_FORM, exception_date: date ?? selected ?? from });
@@ -164,7 +170,8 @@ export default function Holidays({ canWrite = false, onChanged }) {
       exception_type: entry.exception_type,
       description: entry.description ?? '',
       office_id: entry.office_id ?? '',
-      suspended_from: entry.suspended_from ?? '',
+      suspended_from: timeInputValue(entry.suspended_from),
+      suspended_until: timeInputValue(entry.suspended_until),
       is_recurring: entry.is_recurring === true,
       ...formAppliesTo(entry),
     });
@@ -183,7 +190,8 @@ export default function Holidays({ canWrite = false, onChanged }) {
   async function save(event) {
     event.preventDefault();
     if (!canWrite || saving) return;
-    const problems = appliesToErrors(enabled, form.applies_to, form.class_mode);
+    const time = suspensionTimes(form.suspended_from, form.suspended_until);
+    const problems = { ...appliesToErrors(enabled, form.applies_to, form.class_mode), ...time.errors };
     if (Object.keys(problems).length) {
       setFieldErrors(problems); // what was typed stays; nothing is sent
       notify.error(saveFailureMessage({ status: 400, details: problems }));
@@ -197,7 +205,8 @@ export default function Holidays({ canWrite = false, onChanged }) {
         exception_type: form.exception_type,
         description: form.description.trim(),
         office_id: form.office_id || null,
-        suspended_from: form.suspended_from.trim() || null,
+        suspended_from: time.from, // HH:mm as the API wants it, or null for the whole day
+        suspended_until: time.until,
         is_recurring: form.exception_type === 'SUSPENSION' ? false : form.is_recurring,
         ...appliesToBody(enabled, form.applies_to, form.class_mode),
       };
@@ -341,6 +350,7 @@ export default function Holidays({ canWrite = false, onChanged }) {
                             <div>Type: {typeLabel(entry.exception_type)}</div>
                             <div>Scope: {officeName(entry.office_id)}</div>
                             <div>Suspended from: {entry.suspended_from ? formatTime(entry.suspended_from) || entry.suspended_from : 'Whole day'}</div>
+                            {entry.suspended_until ? <div>Suspended until: {formatTime(entry.suspended_until) || entry.suspended_until}</div> : null}
                             <div>Repeats: {entry.is_recurring ? `Every year (from ${entry.exception_date.slice(0, 4)})` : 'No'}</div>
                           </dl>
                           {canWrite ? (
@@ -536,6 +546,7 @@ export default function Holidays({ canWrite = false, onChanged }) {
             {form ? (
               <form id="exception-form" onSubmit={save} className="space-y-4">
                 <ErrorBanner message={offices.error ? `Offices could not be loaded: ${offices.error}` : null} />
+                <ErrorBanner message={formLevelErrors.join(' ') || null} />
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div>
                     <label className="label" htmlFor="exception_date">
@@ -571,30 +582,44 @@ export default function Holidays({ canWrite = false, onChanged }) {
                   </label>
                   <select id="office_id" className="input" value={form.office_id} onChange={(e) => setForm({ ...form, office_id: e.target.value })}>
                     <option value="">Campus-wide (all offices)</option>
-                    {offices.items
-                      .filter((o) => o.is_active)
-                      .map((o) => (
-                        <option key={o.office_id} value={o.office_id}>
-                          {o.office_code} - {o.office_name}
-                        </option>
-                      ))}
+                    {offices.items.map((o) => (
+                      <RecordOption key={o.office_id} record={o} value={o.office_id}>{`${o.office_code} - ${o.office_name}`}</RecordOption>
+                    ))}
                   </select>
                   {fieldErrors.office_id ? <p className="mt-1 text-xs text-red-700">{fieldErrors.office_id}</p> : null}
                 </div>
-                <div>
-                  <label className="label" htmlFor="suspended_from">
-                    Suspended from (HH:MM, 24-hour; leave empty for the whole day)
-                  </label>
-                  <input
-                    id="suspended_from"
-                    className="input w-32"
-                    placeholder="HH:MM"
-                    inputMode="numeric"
-                    maxLength={5}
-                    value={form.suspended_from}
-                    onChange={(e) => setForm({ ...form, suspended_from: e.target.value })}
-                  />
-                  {fieldErrors.suspended_from ? <p className="mt-1 text-xs text-red-700">{fieldErrors.suspended_from}</p> : null}
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="label" htmlFor="suspended_from">
+                      Suspended from
+                    </label>
+                    <input
+                      id="suspended_from"
+                      type="time"
+                      className="input"
+                      aria-invalid={fieldErrors.suspended_from ? true : undefined}
+                      aria-describedby="suspended-times-hint"
+                      value={form.suspended_from}
+                      onChange={(e) => setForm({ ...form, suspended_from: e.target.value })}
+                    />
+                    {fieldErrors.suspended_from ? <p className="mt-1 text-xs text-red-700">{fieldErrors.suspended_from}</p> : null}
+                  </div>
+                  <div>
+                    <label className="label" htmlFor="suspended_until">
+                      Suspended until
+                    </label>
+                    <input
+                      id="suspended_until"
+                      type="time"
+                      className="input"
+                      aria-invalid={fieldErrors.suspended_until ? true : undefined}
+                      aria-describedby="suspended-times-hint"
+                      value={form.suspended_until}
+                      onChange={(e) => setForm({ ...form, suspended_until: e.target.value })}
+                    />
+                    {fieldErrors.suspended_until ? <p className="mt-1 text-xs text-red-700">{fieldErrors.suspended_until}</p> : null}
+                  </div>
+                  <p id="suspended-times-hint" className="text-xs text-slate-500 sm:col-span-2">Leave both empty for a whole-day suspension. For part of the day, enter both times.</p>
                 </div>
                 {enabled ? (
                   <div className="grid gap-4 sm:grid-cols-2">

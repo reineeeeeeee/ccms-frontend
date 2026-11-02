@@ -1,8 +1,12 @@
 'use client';
 
+import { fetchEveryPage, pageSlice, sortNewestFirst } from '../../lib/ui/newest-first.js';
+import RecordOption from '../../components/forms/RecordOption.js';
+import PasswordField from '../../components/forms/PasswordField.js';
+import { passwordStatus } from '../../lib/ui/password-guidance.js';
 import SubmitButton from '../../components/ui/SubmitButton.js';
 import { notify } from '../../lib/ui/notify.js';
-import { saveFailureMessage, savedMessage } from '../../lib/ui/save-feedback.js';
+import { MESSAGES, saveFailureMessage, savedMessage } from '../../lib/ui/save-feedback.js';
 import SearchInput from '../../components/forms/SearchInput.js';
 import ClearFiltersButton from '../../components/forms/ClearFiltersButton.js';
 import { RequiredMark } from '../../components/forms/Field.js';
@@ -86,20 +90,24 @@ function AccountsManager() {
   const load = useCallback(async () => {
     const request = ++latestRequest.current;
     setList((current) => ({ ...current, loading: true, error: null }));
-    const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
-    if (appliedQuery.trim()) params.set('q', appliedQuery.trim());
-    if (role) params.set('role', role);
-    if (office_id) params.set('office_id', office_id);
-    if (status) params.set('status', status);
     try {
-      const data = await apiFetch(`${ACCOUNTS_API}?${params}`);
+      // The service returns accounts A to Z in pages, so all pages of this search are read and ordered newest first here.
+      const all = await fetchEveryPage(apiFetch, (pageNo, size) => {
+        const params = new URLSearchParams({ page: String(pageNo), page_size: String(size) });
+        if (appliedQuery.trim()) params.set('q', appliedQuery.trim());
+        if (role) params.set('role', role);
+        if (office_id) params.set('office_id', office_id);
+        if (status) params.set('status', status);
+        return `${ACCOUNTS_API}?${params}`;
+      });
       if (request !== latestRequest.current) return;
-      setList({ loading: false, items: data.items, total: data.total, error: null });
+      const items = sortNewestFirst(all);
+      setList({ loading: false, items, total: items.length, error: null });
     } catch (err) {
       if (request !== latestRequest.current) return;
       setList((current) => ({ ...current, loading: false, error: err.message }));
     }
-  }, [page, pageSize, appliedQuery, role, office_id, status]);
+  }, [appliedQuery, role, office_id, status]);
 
   useEffect(() => {
     load();
@@ -112,7 +120,6 @@ function AccountsManager() {
     return office ? `${office.office_name}${office.is_active ? '' : ' (inactive)'}` : 'Unknown office';
   };
   // Inactive offices cannot be assigned, except the one an account already has (so the edit form can show it).
-  const officeOptions = (currentId) => offices.filter((o) => o.is_active || o.office_id === currentId);
 
   // A new page size starts again at page 1; the filters and search stay as they are.
   function changePageSize(size) {
@@ -142,6 +149,15 @@ function AccountsManager() {
   async function save(event) {
     event.preventDefault();
     if (busy) return; // one request at a time
+    if (!form.id) {
+      // Only what Identity itself would refuse stops the request here (see lib/ui/password-guidance.js).
+      const password = passwordStatus(form.password);
+      if (password.blocking) {
+        setFieldErrors({ password: password.message });
+        notify.error(MESSAGES.validation);
+        return;
+      }
+    }
     setBusy(true);
     setFieldErrors({});
     try {
@@ -230,7 +246,7 @@ function AccountsManager() {
             <select id="filter-office" className="input select-chevron" value={filters.office_id} onChange={(e) => setFilter('office_id', e.target.value)}>
               <option value="">All offices</option>
               {offices.map((o) => (
-                <option key={o.office_id} value={o.office_id}>{o.office_name}{o.is_active ? '' : ' (inactive)'}</option>
+                <RecordOption key={o.office_id} record={o} value={o.office_id}>{o.office_name}</RecordOption>
               ))}
             </select>
           </div>
@@ -278,7 +294,7 @@ function AccountsManager() {
               ) : list.items.length === 0 ? (
                 <TableState colSpan={6}>No accounts match.</TableState>
               ) : (
-                list.items.map((account) => (
+                pageSlice(list.items, page, pageSize).rows.map((account) => (
                   <tr key={account.account_id} className={`tr-row ${account.is_active ? '' : 'bg-table-hover'}`}>
                     <td className="td">
                       <p className="font-semibold text-slate-900">{account.full_name}</p>
@@ -360,8 +376,8 @@ function AccountsManager() {
                   <label className="label" htmlFor="office_id">Office<RequiredMark /></label>
                   <select id="office_id" className="input" value={form.office_id} onChange={(e) => setForm({ ...form, office_id: e.target.value })}>
                     <option value="">Select an office</option>
-                    {officeOptions(form.office_id).map((o) => (
-                      <option key={o.office_id} value={o.office_id}>{o.office_name}{o.is_active ? '' : ' (inactive)'}</option>
+                    {offices.map((o) => (
+                      <RecordOption key={o.office_id} record={o} value={o.office_id}>{o.office_name}</RecordOption>
                     ))}
                   </select>
                   {fieldErrors.office_id ? <p className="mt-1 text-xs text-red-700">{fieldErrors.office_id}</p> : null}
@@ -369,12 +385,12 @@ function AccountsManager() {
               ) : null}
             </div>
             {!form.id ? (
-              <div>
-                <label className="label" htmlFor="password">Initial password<RequiredMark /></label>
-                <input id="password" type="password" autoComplete="new-password" className="input" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required />
-                <p className="mt-1 text-xs text-slate-500">At least 8 characters. The person can change it through a reset link.</p>
-                {fieldErrors.password ? <p className="mt-1 text-xs text-red-700">{fieldErrors.password}</p> : null}
-              </div>
+              <PasswordField
+                value={form.password}
+                onChange={(password) => setForm({ ...form, password })}
+                error={fieldErrors.password ?? null}
+                helper="The person can change it through a reset link."
+              />
             ) : null}
           </form>
         ) : null}

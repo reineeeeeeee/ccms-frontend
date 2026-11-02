@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { filterOptions } from '../../lib/ui/searchable-select.js';
+import { filterOptions, firstEnabled, lastEnabled, stepEnabled } from '../../lib/ui/searchable-select.js';
 
 /**
  * A searchable single-choice dropdown (ARIA combobox with a listbox) used where a native <select> is too long to read.
@@ -9,8 +9,9 @@ import { filterOptions } from '../../lib/ui/searchable-select.js';
  * the field never makes the form or modal wider. Keyboard: type to search, Up/Down/Home/End to move, Enter to choose,
  * Escape to close (and only close: the modal behind it stays open), Tab leaves.
  *
- * options: [{ value, label, secondary?, search? }]  label is the main text, secondary a smaller line (for example the office),
- *          search the text matched against what was typed (defaults to label + secondary).
+ * options: [{ value, label, secondary?, search?, disabled? }]  label is the main text, secondary a smaller line (for example the office),
+ *          search the text matched against what was typed (defaults to label + secondary). A `disabled` option (an inactive record,
+ *          see lib/ui/record-status.js) stays listed in gray but cannot be highlighted, stepped onto or chosen.
  */
 export default function SearchableSelect({
   id,
@@ -70,8 +71,8 @@ export default function SearchableSelect({
   function openList() {
     if (disabled) return;
     setOpen(true);
-    const at = matches.findIndex((o) => o.value === value);
-    setActive(at >= 0 ? at : 0);
+    const at = matches.findIndex((o) => o.value === value && !o.disabled);
+    setActive(at >= 0 ? at : firstEnabled(matches));
   }
 
   function close() {
@@ -80,6 +81,7 @@ export default function SearchableSelect({
   }
 
   function choose(option) {
+    if (option?.disabled) return; // an inactive record can never be newly chosen
     onChange(option ? option.value : '');
     close();
   }
@@ -109,17 +111,17 @@ export default function SearchableSelect({
         return;
       }
       if (matches.length === 0) return;
-      setActive((i) => (event.key === 'ArrowDown' ? (i + 1) % matches.length : (i - 1 + matches.length) % matches.length));
+      setActive((i) => stepEnabled(matches, i, event.key === 'ArrowDown' ? 1 : -1));
     } else if (event.key === 'Home' && open) {
       event.preventDefault();
-      setActive(0);
+      setActive(firstEnabled(matches));
     } else if (event.key === 'End' && open) {
       event.preventDefault();
-      setActive(Math.max(0, matches.length - 1));
+      setActive(lastEnabled(matches));
     } else if (event.key === 'Enter') {
       if (open) {
         event.preventDefault(); // never submits the form while the list is open
-        if (matches[active]) choose(matches[active]);
+        if (matches[active] && !matches[active].disabled) choose(matches[active]);
       }
     } else if (event.key === 'Escape') {
       if (open) {
@@ -157,7 +159,7 @@ export default function SearchableSelect({
           onClick={openList}
           onChange={(e) => {
             setQuery(e.target.value);
-            setActive(0);
+            setActive(firstEnabled(filterOptions(options, e.target.value)));
             if (!open) setOpen(true);
           }}
           onKeyDown={onKeyDown}
@@ -201,14 +203,15 @@ export default function SearchableSelect({
                 id={`${listId}-${index}`}
                 role="option"
                 aria-selected={option.value === value}
+                aria-disabled={option.disabled || undefined}
                 data-active={index === active ? 'true' : undefined}
-                className={`cursor-pointer px-3 py-2 text-sm ${index === active ? 'bg-maroon-50' : ''} ${option.value === value ? 'font-semibold text-maroon-900' : 'text-slate-800'}`}
-                onMouseEnter={() => setActive(index)}
+                className={`px-3 py-2 text-sm ${option.disabled ? 'cursor-not-allowed text-slate-400' : `cursor-pointer ${index === active ? 'bg-maroon-50' : ''} ${option.value === value ? 'font-semibold text-maroon-900' : 'text-slate-800'}`}`}
+                onMouseEnter={() => (option.disabled ? undefined : setActive(index))}
                 onMouseDown={(event) => event.preventDefault()} // keep focus in the input
                 onClick={() => choose(option)}
               >
                 <span className="block break-words">{option.label}</span>
-                {option.secondary ? <span className="block break-words text-xs font-normal text-slate-500">{option.secondary}</span> : null}
+                {option.secondary ? <span className={`block break-words text-xs font-normal ${option.disabled ? 'text-slate-400' : 'text-slate-500'}`}>{option.secondary}</span> : null}
               </li>
             ))
           )}

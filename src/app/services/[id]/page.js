@@ -21,7 +21,7 @@ import { CATALOGUE_API, classificationLabel, scopeLabel, standardText, standardW
 import { apiFetch } from '../../../lib/auth/session.js';
 import { useFormDirty } from '../../../lib/ui/useFormDirty.js';
 import { useSingleSubmit } from '../../../lib/ui/useSingleSubmit.js';
-import { durationErrors, serviceSaveError, standardToBody } from '../../../lib/ui/service-form.js';
+import { CHARTER_REFERENCE_MAX, durationErrors, serviceSaveError, standardToBody } from '../../../lib/ui/service-form.js';
 import { parseDocumentNotes, parseProcedureSteps, splitLinks } from '../../../lib/ui/parseProcedure.js';
 
 const API = CATALOGUE_API;
@@ -129,7 +129,8 @@ function ServiceDetail({ user, id }) {
     const problems = {
       ...durationErrors(standard),
       ...(standard.effective_from ? {} : { effective_from: 'Enter the date the standard starts.' }),
-      ...(standard.charter_reference.trim() ? {} : { charter_reference: 'Enter the Charter reference.' }),
+      // The Charter reference is optional: only a too-long one is a problem.
+      ...(standard.charter_reference.trim().length > CHARTER_REFERENCE_MAX ? { charter_reference: `Charter reference must be ${CHARTER_REFERENCE_MAX} characters or fewer.` } : {}),
     };
     if (Object.keys(problems).length > 0) {
       setStandardErrors(problems);
@@ -258,7 +259,6 @@ function ServiceDetail({ user, id }) {
                     label: 'Edit',
                     onSelect: () => {
                       setEditErrors({});
-                      setEditError(null);
                       setEditForm(serviceToForm(service));
                     },
                   },
@@ -341,7 +341,6 @@ function ServiceDetail({ user, id }) {
                   className="btn-primary"
                   onClick={() => {
                     setDocErrors({});
-                    setDocError(null);
                     setDoc({ ...EMPTY_DOC });
                   }}
                 >
@@ -374,7 +373,6 @@ function ServiceDetail({ user, id }) {
                                 label: 'Edit',
                                 onSelect: () => {
                                   setDocErrors({});
-                                  setDocError(null);
                                   setDoc({ document_id: d.document_id, document_name: d.document_name, is_mandatory: d.is_mandatory, notes: d.notes ?? '' });
                                 },
                               },
@@ -555,7 +553,6 @@ function ServiceDetail({ user, id }) {
                   <div>
                     <label className="label" htmlFor="std-ref">
                       Charter reference
-                      <RequiredMark />
                     </label>
                     <input
                       id="std-ref"
@@ -563,7 +560,6 @@ function ServiceDetail({ user, id }) {
                       value={standard.charter_reference}
                       onChange={(e) => changeStandard({ charter_reference: e.target.value }, 'charter_reference')}
                       maxLength={200}
-                      aria-required="true"
                       aria-invalid={standardErrors.charter_reference ? true : undefined}
                       aria-describedby={standardErrors.charter_reference ? 'std-ref-error' : undefined}
                     />

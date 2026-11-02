@@ -88,7 +88,7 @@ describe('validation', () => {
   });
   it('flags only the fields that fail, each with its own message', () => {
     const errors = validateServiceForm({ ...valid(), office_id: '', service_abbr: 'A', service_name: 'ab', transaction_types: [], charter_reference: ' ' }, true);
-    assert.deepEqual(Object.keys(errors).sort(), ['charter_reference', 'office_id', 'service_abbr', 'service_name', 'transaction_types']);
+    assert.deepEqual(Object.keys(errors).sort(), ['office_id', 'service_abbr', 'service_name', 'transaction_types']);
     assert.match(errors.transaction_types, /at least one/i);
   });
   it('the abbreviation and standard are only checked when adding', () => {

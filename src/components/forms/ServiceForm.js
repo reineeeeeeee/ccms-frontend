@@ -1,5 +1,6 @@
 'use client';
 
+import RecordOption from './RecordOption.js';
 import { useEffect, useRef, useState } from 'react';
 import { CATALOGUE_API, CLASSIFICATIONS, SERVICE_SCOPES, TRANSACTION_TYPES, standardWarning } from '../../lib/api/catalogue.js';
 import { apiFetch } from '../../lib/auth/session.js';
@@ -150,10 +151,7 @@ export default function ServiceForm({ id, form, setForm, errors, offices, isNew,
         >
           <option value="">Select an office</option>
           {offices.map((o) => (
-            <option key={o.office_id} value={o.office_id}>
-              {o.office_name}
-              {o.is_active === false ? ' (inactive)' : ''}
-            </option>
+            <RecordOption key={o.office_id} record={o} value={o.office_id}>{o.office_name}</RecordOption>
           ))}
         </select>
         <FieldError id={`${id}-office_id-error`}>{fieldError('office_id')}</FieldError>
@@ -482,7 +480,6 @@ export default function ServiceForm({ id, form, setForm, errors, offices, isNew,
             <div>
               <label className="label" htmlFor={`${id}-charter_reference`}>
                 Charter reference
-                <RequiredMark />
               </label>
               <input
                 id={`${id}-charter_reference`}
@@ -491,7 +488,6 @@ export default function ServiceForm({ id, form, setForm, errors, offices, isNew,
                 value={form.charter_reference}
                 onChange={set('charter_reference')}
                 maxLength={200}
-                aria-required="true"
                 aria-invalid={invalid('charter_reference')}
                 aria-describedby={describe('charter_reference')}
               />

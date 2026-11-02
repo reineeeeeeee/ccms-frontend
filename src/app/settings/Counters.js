@@ -1,5 +1,6 @@
 'use client';
 
+import RecordOption from '../../components/forms/RecordOption.js';
 import { RequiredMark } from '../../components/forms/Field.js';
 import { useCallback, useEffect, useState } from 'react';
 import { ROLES } from 'ccms-shared/roles';
@@ -114,7 +115,6 @@ export default function Counters({ user, canWrite }) {
     }
   }
 
-  const officeName = (o) => `${o.office_name}${o.is_active ? '' : ' (inactive)'}`;
   const noOffice = ownOffice && !user.officeId;
   const columns = canWrite ? 3 : 2;
   const rows = list.officeId === officeId ? list.items : [];
@@ -153,9 +153,7 @@ export default function Counters({ user, canWrite }) {
               {offices.loading ? <option value="">Loading offices…</option> : null}
               {!offices.loading && offices.items.length === 0 ? <option value="">No offices yet</option> : null}
               {offices.items.map((o) => (
-                <option key={o.office_id} value={o.office_id}>
-                  {officeName(o)}
-                </option>
+                <RecordOption key={o.office_id} record={o} value={o.office_id}>{o.office_name}</RecordOption>
               ))}
             </select>
           </div>

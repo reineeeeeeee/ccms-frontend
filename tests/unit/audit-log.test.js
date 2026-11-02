@@ -419,7 +419,7 @@ describe('the table and filter bar after the clean-up (source checks, not a brow
     assert.match(code, /const \[applied, setApplied\] = useState\(\{ \.\.\.EMPTY_AUDIT_FILTERS \}\)/);
     assert.match(code, /const set = \(name\) => \(e\) => setDraft\(\{ \.\.\.draft, \[name\]: e\.target\.value \}\)/);
     // The only places that fetch are the first load, Apply (the form's submit), Clear and the paging buttons.
-    assert.equal([...code.matchAll(/\brun\(/g)].length, 5, 'run( is called by Apply, Clear and two paging buttons, and defined once');
+    assert.equal([...code.matchAll(/\brun\(/g)].length, 6, 'run( is called by Apply, Clear, Retry and two paging buttons, and defined once');
     assert.equal([...code.matchAll(/listAuditEvents\(/g)].length, 2, 'one for the first load, one inside run');
     assert.match(code, /onSubmit=\{apply\}/);
     assert.match(code, /setDraft\(\{ search: '', from: '', to: '' \}\);\s*setFieldErrors\(\{\}\);\s*run\(\{ \.\.\.EMPTY_AUDIT_FILTERS \}, 1, null\);/);

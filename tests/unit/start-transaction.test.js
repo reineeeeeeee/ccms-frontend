@@ -332,7 +332,7 @@ describe('the screen\'s own guards (source checks, not a browser)', () => {
 
   it('shows the counter picker only when counters are enabled, loaded from the service, with no default', () => {
     assert.match(page, /\{countersEnabled \? \(\s*<Section flat=\{embedded\} title="Counter"/);
-    assert.match(page, /filter\(\(c\) => c\.is_active\)/);
+    assert.ok(page.includes('<RecordOption key={counter.counter_id} record={counter}'), 'an inactive counter is listed, gray and disabled, never hidden');
     assert.match(page, /listCounters\(officeId\)/);
   });
 
@@ -498,5 +498,20 @@ describe('the clear (X) button of the searchable dropdown is optional (source ch
     assert.ok(widget.includes('{clearable && selected && !disabled ? ('));
     assert.ok(widget.includes("clearable ? 'pr-16' : 'pr-9'"));
     assert.ok(!read('src/components/transactions/StartTransactionForm.js').includes('clearable={false}'));
+  });
+});
+
+describe('Late entry wording (source checks, not a browser)', () => {
+  const form = read('src/components/transactions/StartTransactionForm.js');
+  it('uses the agreed heading, checkbox description and note, and the old wording is gone', () => {
+    assert.ok(form.includes('title="Late entry" id="past-heading"'));
+    assert.ok(form.includes('This was already done. I am recording it now.'));
+    assert.ok(form.includes('Enter the real start and end time. A reason is required, and this transaction will be marked as a late entry in the records. Times are Philippine time. The service standard that was in effect on the start date is used automatically.'));
+    assert.ok(!form.includes('title="Record past transaction"'));
+    assert.ok(!form.includes('already happened. I am entering its time after the fact'));
+    assert.ok(!form.includes('All times are Manila time (Asia/Manila). The standard in force'));
+  });
+  it('the checkbox is the same one: same id, same toggle', () => {
+    assert.ok(form.includes('id="start-past" type="checkbox"') && form.includes('checked={past.enabled} onChange={(e) => togglePast(e.target.checked)}'));
   });
 });

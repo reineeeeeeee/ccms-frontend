@@ -11,6 +11,8 @@ const config = [
       '@next/next/no-html-link-for-pages': 'off',
       '@next/next/no-location-assign-relative-destination': 'off',
       'no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+      // A call to a state setter or helper that was removed (for example setFormError) must fail the lint, not the page.
+      'no-undef': 'error',
     },
   },
 ];

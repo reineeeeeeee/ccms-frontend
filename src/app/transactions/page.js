@@ -1,5 +1,7 @@
 'use client';
 
+import { recordOption } from '../../lib/ui/record-status.js';
+import RecordOption from '../../components/forms/RecordOption.js';
 import SearchInput from '../../components/forms/SearchInput.js';
 import ClearFiltersButton from '../../components/forms/ClearFiltersButton.js';
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
@@ -18,7 +20,7 @@ import TableState from '../../components/ui/TableState.js';
 import Pager from '../../components/navigation/Pager.js';
 import { OFFICES_API } from '../../lib/api/catalogue.js';
 import { listCounters } from '../../lib/api/operations.js';
-import { listStartableServices, listTransactionPage } from '../../lib/api/transactions.js';
+import { listSelectableServices, listTransactionPage } from '../../lib/api/transactions.js';
 import { apiFetch } from '../../lib/auth/session.js';
 import { COMPLIANCE_LABELS, complianceState } from '../../lib/ui/complete-transaction.js';
 import { formatDateTime } from '../../lib/ui/date-format.js';
@@ -100,7 +102,7 @@ function TransactionList({ user }) {
     let cancelled = false;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- first load of the list the address bar describes
     run(start.filters, start.page, start.pageSize);
-    Promise.allSettled([listStartableServices({ isSuperAdmin }), listCounters(undefined), isSuperAdmin ? apiFetch(OFFICES_API) : Promise.resolve(null)]).then(([services, counters, offices]) => {
+    Promise.allSettled([listSelectableServices(), listCounters(undefined), isSuperAdmin ? apiFetch(OFFICES_API) : Promise.resolve(null)]).then(([services, counters, offices]) => {
       if (cancelled) return;
       setOptions({
         services: services.status === 'fulfilled' ? services.value : [],
@@ -159,9 +161,7 @@ function TransactionList({ user }) {
   // The Service filter: "All services" first, then each service by name with its office underneath (typing matches name, code or office).
   const serviceFilterOptions = [
     { value: '', label: 'All services', search: 'all services' },
-    ...options.services.map((s) => ({
-      value: s.service_id,
-      label: s.service_name,
+    ...options.services.map((s) => recordOption(s, s.service_id, s.service_name, {
       secondary: officeName(s),
       search: `${s.service_name} ${s.service_code ?? ''} ${s.office_name ?? ''} ${s.office_code ?? ''}`,
     })),
@@ -209,7 +209,7 @@ function TransactionList({ user }) {
               <label className="label" htmlFor="tx-office">Office</label>
               <select id="tx-office" className="input select-chevron" value={draft.office_id} onChange={choose('office_id')} aria-invalid={fieldErrors.office_id ? true : undefined} aria-describedby={describedBy('office_id')}>
                 <option value="">All offices</option>
-                {options.offices.map((o) => <option key={o.office_id} value={o.office_id}>{o.office_name}</option>)}
+                {options.offices.map((o) => <RecordOption key={o.office_id} record={o} value={o.office_id}>{o.office_name}</RecordOption>)}
               </select>
               {fieldError('office_id')}
             </div>
@@ -219,7 +219,7 @@ function TransactionList({ user }) {
               <label className="label" htmlFor="tx-counter">Counter</label>
               <select id="tx-counter" className="input select-chevron" value={draft.counter_id} onChange={choose('counter_id')} aria-invalid={fieldErrors.counter_id ? true : undefined} aria-describedby={describedBy('counter_id')}>
                 <option value="">All counters</option>
-                {options.counters.map((c) => <option key={c.counter_id} value={c.counter_id}>{c.label}{c.is_active ? '' : ' (inactive)'}</option>)}
+                {options.counters.map((c) => <RecordOption key={c.counter_id} record={c} value={c.counter_id}>{c.label}</RecordOption>)}
               </select>
               {fieldError('counter_id')}
             </div>

@@ -5,7 +5,6 @@ import ClearFiltersButton from '../../components/forms/ClearFiltersButton.js';
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { ROLES, ROLE_LABELS } from 'ccms-shared/roles';
 import AppShell from '../../components/layout/AppShell.js';
-import ErrorBanner from '../../components/feedback/ErrorBanner.js';
 import AuditValue from '../../components/ui/AuditValue.js';
 import RoleBadge from '../../components/ui/RoleBadge.js';
 import TableShell, { Table, Th } from '../../components/ui/TableShell.js';
@@ -165,8 +164,6 @@ function AuditLog() {
   const filtered = Object.keys(EMPTY_AUDIT_FILTERS).some((key) => applied[key]);
   return (
     <div className="space-y-4">
-      <ErrorBanner message={state.error} onDismiss={() => setState((current) => ({ ...current, error: null }))} />
-
       <form className="card p-5 sm:p-6" onSubmit={apply} noValidate aria-label="Filter the audit log">
         <div className="flex flex-wrap items-start gap-x-4 gap-y-4">
           <div className="w-full sm:w-64">
@@ -241,9 +238,17 @@ function AuditLog() {
               {state.loading && state.items.length === 0 ? (
                 <TableState colSpan={COLUMNS} kind="loading">Loading audit log...</TableState>
               ) : state.items.length === 0 ? (
-                <TableState colSpan={COLUMNS}>
+                <TableState colSpan={COLUMNS} kind={state.error ? 'error' : 'empty'}>
                   {state.error
-                    ? 'The audit log could not be loaded.'
+                    ? (
+                      // The failure is said once, here (no banner above says it again), with the reason the service gave and a Retry.
+                      <span className="flex flex-col items-center gap-3" role="alert">
+                        <span data-testid="audit-error">{state.error}</span>
+                        <button type="button" className="btn-secondary" onClick={() => run(applied, 1)}>
+                          Retry
+                        </button>
+                      </span>
+                    )
                     : filtered
                       ? appliedSearch && !applied.from && !applied.to
                         ? `No entries match "${appliedSearch.text}". Search needs a full user ID, an exact action such as ACCOUNT_CREATED, or an entity type such as account.`

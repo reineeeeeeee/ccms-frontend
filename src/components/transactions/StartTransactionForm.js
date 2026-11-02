@@ -1,5 +1,7 @@
 'use client';
 
+import { isSelectable, recordOption } from '../../lib/ui/record-status.js';
+import RecordOption from '../forms/RecordOption.js';
 import SubmitButton from '../../components/ui/SubmitButton.js';
 import { notify } from '../../lib/ui/notify.js';
 import { saveFailureMessage, savedMessage } from '../../lib/ui/save-feedback.js';
@@ -12,7 +14,7 @@ import StatusBanner from '../feedback/StatusBanner.js';
 import { classificationLabel } from '../../lib/api/catalogue.js';
 import { getServiceStandardAsOf, listRecordsOnDate } from '../../lib/api/backdate.js';
 import { getSettings, listCounters } from '../../lib/api/operations.js';
-import { getServiceDetail, getServiceStandard, listOpenTransactions, listStartableServices, postTransaction } from '../../lib/api/transactions.js';
+import { getServiceDetail, getServiceStandard, listOpenTransactions, listSelectableServices, postTransaction } from '../../lib/api/transactions.js';
 import { BACKDATE_MESSAGES, BACKDATE_REASON_MAX, EMPTY_PAST, backdateErrors, isAmbiguousWrite, manilaDateOf, pastStandardMessage, withBackdate } from '../../lib/ui/backdate.js';
 import { COMPLIANCE_LABELS, complianceState, describeElapsed, describeVariance } from '../../lib/ui/complete-transaction.js';
 import StatusBadge from '../ui/StatusBadge.js';
@@ -85,7 +87,7 @@ export default function StartTransactionForm({ user, embedded = false, onCreated
   // The service list and the settings (are counters in use?) load once.
   useEffect(() => {
     let cancelled = false;
-    listStartableServices({ isSuperAdmin })
+    listSelectableServices()
       .then((items) => !cancelled && setServices({ loading: false, items, error: null }))
       .catch((err) => !cancelled && setServices({ loading: false, items: [], error: err.status === 403 ? 'You do not have permission to see the services.' : 'The services could not be loaded. Reload the page to try again.' }));
     getSettings()
@@ -99,9 +101,7 @@ export default function StartTransactionForm({ user, embedded = false, onCreated
   const selected = useMemo(() => services.items.find((s) => s.service_id === form.service_id) ?? null, [services.items, form.service_id]);
   // The picker shows the service name with its office underneath; typing matches the name, code or office (name or code).
   const serviceOptions = useMemo(
-    () => services.items.map((service) => ({
-      value: service.service_id,
-      label: service.service_name,
+    () => services.items.map((service) => recordOption(service, service.service_id, service.service_name, {
       secondary: officeName(service),
       search: `${service.service_name} ${service.service_code ?? ''} ${service.office_name ?? ''} ${service.office_code ?? ''}`,
     })),
@@ -131,7 +131,7 @@ export default function StartTransactionForm({ user, embedded = false, onCreated
     if (detailResult.status === 'fulfilled') setDocuments({ state: 'ready', items: detailResult.value.documents ?? [], message: null });
     else setDocuments({ state: 'failed', items: [], message: 'The required documents could not be loaded, so a transaction cannot be started. Please try again.' });
     if (countersEnabled) {
-      if (counterResult.status === 'fulfilled') setCounters({ state: 'ready', items: (counterResult.value?.items ?? []).filter((c) => c.is_active), message: null });
+      if (counterResult.status === 'fulfilled') setCounters({ state: 'ready', items: (counterResult.value?.items ?? []), message: null });
       else setCounters({ state: 'failed', items: [], message: 'The counters could not be loaded. Please try again.' });
     }
   }
@@ -413,12 +413,12 @@ export default function StartTransactionForm({ user, embedded = false, onCreated
         </div>
       </Section>
 
-      <Section flat={embedded} title="Record past transaction" id="past-heading">
+      <Section flat={embedded} title="Late entry" id="past-heading">
         <label className="flex items-start gap-3 text-sm text-slate-800">
           <input id="start-past" type="checkbox" className="mt-0.5 h-4 w-4 rounded border-slate-300 accent-[#800000]" checked={past.enabled} onChange={(e) => togglePast(e.target.checked)} />
           <span>
-            This transaction already happened. I am entering its time after the fact.
-            <span className="block text-xs text-slate-500">All times are Manila time (Asia/Manila). The standard in force on the day of the start is applied by the system.</span>
+            This was already done. I am recording it now.
+            <span className="block text-xs text-slate-500">Enter the real start and end time. A reason is required, and this transaction will be marked as a late entry in the records. Times are Philippine time. The service standard that was in effect on the start date is used automatically.</span>
           </span>
         </label>
         {past.enabled ? (
@@ -622,20 +622,20 @@ export default function StartTransactionForm({ user, embedded = false, onCreated
               className="input"
               value={form.counter_id}
               onChange={set('counter_id')}
-              disabled={counters.state !== 'ready' || counters.items.length === 0}
+              disabled={counters.state !== 'ready' || !counters.items.some(isSelectable)}
               aria-invalid={fieldErrors.counter ? true : undefined}
               aria-describedby={fieldErrors.counter ? 'start-counter-error' : undefined}
             >
               <option value="">
-                {counters.state === 'idle' ? 'Choose a service first' : counters.state === 'loading' ? 'Loading counters…' : counters.items.length === 0 ? 'No active counters' : 'Select your counter'}
+                {counters.state === 'idle' ? 'Choose a service first' : counters.state === 'loading' ? 'Loading counters…' : !counters.items.some(isSelectable) ? 'No active counters' : 'Select your counter'}
               </option>
               {counters.items.map((counter) => (
-                <option key={counter.counter_id} value={counter.counter_id}>{counter.label}</option>
+                <RecordOption key={counter.counter_id} record={counter} value={counter.counter_id}>{counter.label}</RecordOption>
               ))}
             </select>
             <FieldError id="start-counter-error">{fieldErrors.counter}</FieldError>
             {counters.state === 'failed' ? <p className="mt-1 text-xs text-red-700">{counters.message}</p> : null}
-            {counters.state === 'ready' && counters.items.length === 0 ? <p className="mt-1 text-xs text-slate-500">This office has no active counters. Ask a Super Admin to add one.</p> : null}
+            {counters.state === 'ready' && !counters.items.some(isSelectable) ? <p className="mt-1 text-xs text-slate-500">This office has no active counters. Ask a Super Admin to add one.</p> : null}
           </div>
         </Section>
       ) : null}

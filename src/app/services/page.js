@@ -1,5 +1,7 @@
 'use client';
 
+import { fetchEveryPage, pageSlice, sortNewestFirst } from '../../lib/ui/newest-first.js';
+import RecordOption from '../../components/forms/RecordOption.js';
 import SubmitButton from '../../components/ui/SubmitButton.js';
 import { notify } from '../../lib/ui/notify.js';
 import { saveFailureMessage, savedMessage } from '../../lib/ui/save-feedback.js';
@@ -72,15 +74,16 @@ function ServicesManager({ user }) {
     const request = ++latestRequest.current;
     setState((s) => ({ ...s, loading: true, error: null }));
     try {
-      const query = toQuery({ ...applied, office_id: ownOfficeOnly ? undefined : applied.office_id, status: isAdmin ? applied.status : undefined, page, page_size: pageSize });
-      const data = await apiFetch(`${API}/services${query}`);
+      // The service returns services A to Z in pages, so all pages of this search are read and ordered newest first here.
+      const all = await fetchEveryPage(apiFetch, (pageNo, size) => `${API}/services${toQuery({ ...applied, office_id: ownOfficeOnly ? undefined : applied.office_id, status: isAdmin ? applied.status : undefined, page: pageNo, page_size: size })}`);
       if (request !== latestRequest.current) return;
-      setState({ loading: false, items: data.items, total: data.total, error: null });
+      const items = sortNewestFirst(all);
+      setState({ loading: false, items, total: items.length, error: null });
     } catch (err) {
       if (request !== latestRequest.current) return;
       setState((s) => ({ ...s, loading: false, error: err.message }));
     }
-  }, [applied, page, pageSize, isAdmin, ownOfficeOnly]);
+  }, [applied, isAdmin, ownOfficeOnly]);
 
   useEffect(() => {
     reload();
@@ -112,7 +115,6 @@ function ServicesManager({ user }) {
 
   function openForm(service) {
     setFieldErrors({});
-    setFormError(null);
     setForm(service ? { id: service.service_id, current_standard: service.current_standard ?? null, ...serviceToForm(service) } : { ...EMPTY_SERVICE_FORM });
   }
 
@@ -159,7 +161,6 @@ function ServicesManager({ user }) {
     }
   }
 
-  const activeOffices = offices.filter((o) => o.is_active);
 
   const tableColumns = [
     {
@@ -247,9 +248,7 @@ function ServicesManager({ user }) {
               <select id="svc-office" className="input select-chevron" value={filters.office_id} onChange={(e) => applyFilters({ ...filters, office_id: e.target.value })}>
                 <option value="">All offices</option>
                 {offices.map((o) => (
-                  <option key={o.office_id} value={o.office_id}>
-                    {o.office_name}
-                  </option>
+                  <RecordOption key={o.office_id} record={o} value={o.office_id}>{o.office_name}</RecordOption>
                 ))}
               </select>
             </div>
@@ -292,7 +291,7 @@ function ServicesManager({ user }) {
 
       <DataTable
         columns={tableColumns}
-        data={state.items}
+        data={pageSlice(state.items, page, pageSize).rows}
         keyExtractor={(s) => s.service_id}
         rowClassName={(s) => (s.is_active ? '' : 'bg-table-hover')}
         loading={state.loading}
@@ -328,7 +327,7 @@ function ServicesManager({ user }) {
       >
         {form ? (
           <div className="space-y-4">
-            <ServiceForm id="service-form" form={form} setForm={setForm} errors={fieldErrors} offices={form.id ? offices : activeOffices} isNew={!form.id} onSubmit={save} currentStandard={form.id ? form.current_standard ?? null : null} />
+            <ServiceForm id="service-form" form={form} setForm={setForm} errors={fieldErrors} offices={offices} isNew={!form.id} onSubmit={save} currentStandard={form.id ? form.current_standard ?? null : null} />
           </div>
         ) : null}
       </Modal>

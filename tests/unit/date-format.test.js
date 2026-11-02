@@ -138,7 +138,8 @@ describe('formatting stays at the display boundary', () => {
   it('request bodies are built from the form values, not from formatted text', () => {
     const has = (file, text) => assert.ok(read(file).includes(text), `${file} should contain: ${text}`);
     has('src/app/calendar/Holidays.js', 'exception_date: form.exception_date,');
-    has('src/app/calendar/Holidays.js', 'suspended_from: form.suspended_from.trim() || null,');
+    has('src/app/calendar/Holidays.js', 'suspended_from: time.from,');
+    has('src/app/calendar/Holidays.js', 'suspended_until: time.until,');
     has('src/app/calendar/Terms.js', 'start_date: form.start_date, end_date: form.end_date');
     has('src/app/calendar/WorkingHours.js', 'opening_time: r.opening_time.trim(), closing_time: r.closing_time.trim()');
     has('src/lib/ui/service-form.js', 'effective_from: values.effective_from,');
