@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # ccms-shared is vendored in vendor/ccms-shared, so there is nothing else to check out.
+      - run: npm ci
+      # Production dependencies: fail only on high/critical advisories.
+      # Current moderate findings come from glob/minimatch pulled by typeorm in ccms-shared,
+      # and npm reports no fix is available yet.
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+      # Everything, including development tooling, reported separately. This step is visible but does not
+      # fail the build while GHSA-vfj7-8cjw-p6xm (braces <= 3.0.3, lint toolchain only, no patched version
+      # exists) is open. The Audit job is never marked clean: re-check it when braces publishes a fix.
+      - name: Audit all dependencies (development tooling included)
+        run: npm audit
+        continue-on-error: true
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
